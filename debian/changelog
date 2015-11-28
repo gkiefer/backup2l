@@ -1,0 +1,105 @@
+backup2l (1.5) unstable; urgency=low
+  * Add self-test script to each external volume
+  * changed FORMAT to truncate fractional parts from time stamps in .list.gz files (needed for Debian 5.0/Lenny)
+  * backup2l.conf: added some comments on how to use SKIPCOND for certain features
+  * fixed false errors with special characters, closes #291423, #305792
+  * changed chown invocation ("g:u" instead of "g.u")
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Tue,  13 Dec 2009 20:13:05 +0100
+
+backup2l (1.4) unstable; urgency=low
+  * Misc. adaptions to allow directory structures as archives
+  * first-time.conf: added section with donated sample drivers
+  * DRIVER_AFIOZ: accesses archives only via stdin/stdout to allow files > 2GB
+  * Improved POSIX compliance, closes #261950
+  * Improved support for complex SKIPCOND settings including "(", ")", "!"
+  * Fixed restore of files with glob(7) control characters, closes #235249
+  * misc. typos in doc, closes #250672, #250671
+  * adopted documentation to correctly state that MAX_FULL must be <= 8, closes #233962
+  * some adaptions to Mac OS X with the help of Joe Auricchio <avarame@ml1.net>
+  * turned SED_* macros into FILTER_* to allow alternative filter program instead of sed
+  * install-sh: autodetects cron/daily directory (compatibility with Mac OS X)
+  * install-sh: fixed error in usage (<conf-prefix>)
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Tue,  4 Jan 2005 16:10:05 +0100
+
+backup2l (1.3) unstable; urgency=low
+  * Removed "--same-order" option in tar-based drivers (fixes problems during restore)
+  * Improved checking of required drivers before starting a restore operation
+  * Fixed some typos in comments and documentation
+  * Set Debian standards version to 3.6.1
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Wed, 8 Oct 2003 19:22:00 +0200
+
+backup2l (1.2) unstable; urgency=low
+  * Fixed false alarms with special characters in file names (closes #763710, #587658)
+  * Added DRIVER_TAR (Philippe "BooK" Bruhat)
+  * Moved Debian adaptions by Chris Davis upstream
+  * Set Debian standards version to 3.6.0
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Mon, 2 Sep 2003 20:47:17 +0200
+
+backup2l (1.1-gk.1.1) unstable; urgency=low
+  * Initial upload into Debian (closes: 142857)
+  * Remove unnecessary postinst
+
+ -- Chris G. Davis <cd@debian.org>  Fri, 25 Jul 2003 15:10:34 -0400
+
+backup2l (1.1-gk.1) unstable; urgency=low
+  * New: open driver architecture for different archive formats
+  * fixed bugs with regexps for --restore, --locate, --get-available
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Sun, 18 May 2003 12:16:07 +0200
+
+backup2l (1.01-gk.1) unstable; urgency=low
+  * fixed incorrect backup list sorting (bug #637066)
+  * removed "bc" usage
+  * stricter filter macros for SED_NAME, SED_CHOWN, SED_CHMOD (should fix various bugs including patch 702979 from Gene Skonicki)
+  * human readable sizes (based on patch by Jarno Elonen)
+  * allow wildcards in <BID list> argument of ANY operation
+  * support for filesystems not allowing symlinks (patch by Jason Creighton)
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Sun, 9 Apr 2003 12:59:00 +0200
+
+backup2l (1.00-gk.1) unstable; urgency=low
+  * Fixed problem with special characters in file names (bug #587658)
+  * .tar.gz files can savely be removed
+  * Various fixes/patches
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Sun, 8 Sep 2002 17:30:00 +0200
+
+backup2l (0.93-gk.1) unstable; urgency=low
+
+  * Changed: diff is invoked without '-d' (performance issue with large numbers of files)
+  * New: POST_BACKUP
+  * Fixed: compatibility with pre-0.9 .list files
+  * Various fixes/patches
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Thu, 9 Mar 2002 15:26:00 +0100
+
+backup2l (0.92-gk.1) unstable; urgency=low
+
+  * Fixed: incorrectly determined base archive resulting in full backup instead of incremental
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Thu, 17 Jan 2002 11:11:01 +0100
+
+backup2l (0.91-gk.1) unstable; urgency=low
+
+  * New: command to generate CD-ready data directories
+  * Time in summary display
+  * Workaround for bug in find 4.1.7 (no leading 0's in printf if requested)
+  * Use of shell arrays for SRCLIST
+  * Fixed problems with spaces in file names
+  * Minor bugfixes
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Tue,  6 Nov 2001 09:32:13 +0100
+
+backup2l (0.9-gk.1) unstable; urgency=low
+
+  * Initial release
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Mon, 29 Oct 2001 14:58:47 +0100
+
+Local variables:
+mode: debian-changelog
+End:

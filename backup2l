@@ -1,0 +1,1381 @@
+#!/bin/bash
+
+# backup2l --- low-maintenance backup tool
+
+# Copyright (c) 2001-2009 Gundolf Kiefer <gundolf.kiefer@web.de>
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc.; 59 Temple Place, Suite 330;
+# Boston, MA 02111-1307, USA.
+
+
+
+
+
+##################################################
+# Set global variables
+
+VER=1.5
+
+
+# The following variable defines the commonly required tools. Additional tools
+# may be required by special functions, e. g. md5sum by the check functions.
+# Tool requirements are check in the do_* and show_* functions.
+
+COMMON_TOOLS="date find grep gzip gunzip sed awk mount umount"
+
+
+# The following variables define the format of *.list files. Modify at your own risk.
+
+FORMAT="%8s %TD %.8TT %04U.%04G %04m %p"     # format for *.list files
+
+FILTER_NAME="sed 's#^\([-:. 0-9]*/\)\{3\}#/#'"
+    # sed command for extracting names from .list, .new, ... files
+    # (removes everything up to the 3rd "/"; two are contained in the time field)
+FILTER_CHOWN="sed 's#^\( *[^ ]\+\)\{3\} *0\{0,3\}\([0-9]\+\)\.0\{0,3\}\([0-9]\+\) \+\([0-9]*\)\{4\} \+/\(.*\)\$#\2:\3 \"\5\"#'"
+    # sed command for extracting ownerships and names from .list files
+FILTER_CHMOD="sed 's#^\( *[^ ]\+\)\{4\} *\([0-9]\{4\}\) \+/\(.*\)\$#\2 \"\3\"#'"
+    # sed command for extracting permissions and names from .list files
+#FILTER_UNIFY_NAME="sed 's#\\\\[0-7]\{3\}#?#g;   s#[^a-zA-Z0-9_ .$%:~/=+\#\-]#?#g'"
+FILTER_UNIFY_NAME="sed 's#\\\\[0-7]\{3\}#?#g;   s#[^a-zA-Z0-9_ .$%:~/=+\#\-]#?#g'"
+    # replaces special and escaped characters by '?';
+    # only used when checking TOCs of fresh backup archives in order to avoid false alarms
+
+# The following alternative (donated by Christian Ludwig <Ludwig_C@gmx.de>) is slightly more precise,
+# but requires perl to be installed:
+#FILTER_UNIFY_NAME="perl -n -e 's{\\\\(\d{3})}{chr(oct(\$1))}eg; print;'"
+
+# On systems without GNU sed >= 3.0.2 such as Mac OS X, try the following alternatives...
+# ... settings (donated by Joe Auricchio <avarame@ml1.net>).
+
+#FILTER_CHOWN="perl -pe 's#^( *[^ ]+){3} *0{0,3}([0-9]+).0{0,3}([0-9]+) +([0-9]*){4} +/(.*)\$#\$2.\$3 \"\$5\"#'"
+#FILTER_CHMOD="perl -pe 's#^( *[^ ]+){4} *([0-9]{4}) +/(.*)\$#\$2 \"\$3\"#'"
+
+#COMMON_TOOLS="$COMMON_TOOLS perl"
+
+
+
+
+
+##################################################
+# Misc. helpers
+
+
+require_tools ()
+{
+    local NOT_AVAIL=""
+    for TOOL in $@; do
+        if [ "`which $TOOL 2> /dev/null`" == "" ]; then NOT_AVAIL="$NOT_AVAIL $TOOL"; fi
+    done
+    if [[ "$NOT_AVAIL" != "" ]]; then
+        echo "ERROR: The following required tool(s) cannot be found: $NOT_AVAIL"
+        exit 3
+    fi
+}
+
+
+get_bid_of_name ()
+{
+    local SUFFIX=${1#$VOLNAME.}
+    echo ${SUFFIX%%.*}
+}
+
+
+get_last_bid ()
+{
+    if [ -f $VOLNAME.1.list.gz ]; then
+        REV_ARCH_LIST=(`ls $VOLNAME.*.list.gz | sort -r`)
+        get_bid_of_name ${REV_ARCH_LIST[0]}
+    else
+        echo "0"  # default if no archives exist yet
+    fi
+}
+
+
+get_base_bid ()
+{
+    local BID=$(( $1 - 1 ))
+    echo ${BID%%+(0)}
+}
+
+
+expand_bid_list ()
+{
+    local SUFFIX="$1"
+    shift
+    local ARCH_LIST=""
+    local BID ARCH
+    for BID in "$@"; do
+        ARCH_LIST="$ARCH_LIST `ls -1 $BACKUP_DIR/$VOLNAME.$BID.$SUFFIX 2> /dev/null`"
+    done
+    local BID_LIST=""
+    local ARCH
+    for ARCH in $ARCH_LIST; do
+        BID_LIST="$BID_LIST `get_bid_of_name ${ARCH#$BACKUP_DIR/}`"
+    done
+    echo $BID_LIST
+}
+
+
+do_symlink ()
+{
+    # tries to symlink & copies if not possible (e. g. on FAT32/Samba file systems)
+    ln -s $@ &> /dev/null ||
+    cp -af $@
+}
+
+
+readable_bytes_sum ()
+{
+  awk -v UNIT=$1 '
+    { B += $1 }
+    END {
+      KB=B / 1024.0;
+      MB=KB / 1024.0;
+      GB=MB / 1024.0;
+      if ((GB>=1.0 && UNIT=="") || UNIT=="G" || UNIT=="g") print sprintf("%.1fG", GB);
+      else if ((MB>=1.0 && UNIT=="") || UNIT=="M" || UNIT=="m") print sprintf("%.1fM", MB);
+      else if ((KB>=1.0 && UNIT=="") || UNIT=="K" || UNIT=="k") print sprintf("%.0fK", KB);
+      else print sprintf("%i ", B);
+    }
+  '
+}
+
+
+
+
+
+##################################################
+# Archive drivers & helpers
+
+
+BUILTIN_DRIVER_LIST="DRIVER_TAR DRIVER_TAR_GZ DRIVER_TAR_BZ2 DRIVER_AFIOZ"
+
+
+DRIVER_TAR ()
+{
+    case $1 in
+        -test)
+            require_tools tar
+            echo "ok"
+            ;;
+        -suffix)
+            echo "tar"
+            ;;
+        -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
+            tar cf $3 -T $4 --numeric-owner --no-recursion 2>&1 \
+                | grep -v 'tar: Removing leading .* from .* names'
+            ;;
+        -toc)           # Arguments: $2 = BID, $3 = archive file name
+            tar tf $3 | sed 's#^#/#'
+            ;;
+        -extract)       # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
+            tar x --same-permission --same-owner --numeric-owner -f $3 -T $4 2>&1
+            ;;
+    esac
+}
+
+
+DRIVER_TAR_GZ ()
+{
+    case $1 in
+        -test)
+            require_tools tar
+            echo "ok"
+            ;;
+        -suffix)
+            echo "tar.gz"
+            ;;
+        -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
+            tar czf $3 -T $4 --no-recursion 2>&1 \
+                | grep -v 'tar: Removing leading .* from .* names'
+            ;;
+        -toc)           # Arguments: $2 = BID, $3 = archive file name
+            tar tzf $3 | sed 's#^#/#'
+            ;;
+        -extract)       # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
+            tar zx --same-permission --same-owner -f $3 -T $4 2>&1
+            ;;
+    esac
+}
+
+
+DRIVER_TAR_BZ2 ()
+{
+    case $1 in
+        -test)
+            require_tools tar bzip2
+            echo "ok"
+            ;;
+        -suffix)
+            echo "tar.bz2"
+            ;;
+        -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
+            tar cjf $3 -T $4 --no-recursion 2>&1 \
+                | grep -v 'tar: Removing leading .* from .* names'
+            ;;
+        -toc)           # Arguments: $2 = BID, $3 = archive file name
+            tar tjf $3 | sed 's#^#/#'
+            ;;
+        -extract)       # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
+            tar jx --same-permission --same-owner -f $3 -T $4 2>&1
+            ;;
+    esac
+}
+
+
+DRIVER_AFIOZ ()
+{
+    case $1 in
+        -test)
+            require_tools afio
+            echo "ok"
+            ;;
+        -suffix)
+            echo "afioz"
+            ;;
+        -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
+            afio -Zo $3 < $4 2>&1
+#            afio -Zo - < $4 > $3 2>&1
+            ;;
+        -toc)           # Arguments: $2 = BID, $3 = archive file name
+            afio -Zt $3 | sed 's#^#/#' # 's#^#/#;s#\.z$##'
+#            afio -Zt - < $3 | sed 's#^#/#' # 's#^#/#;s#\.z$##'
+            ;;
+        -extract)       # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
+            afio -Zinw $4 $3 2>&1
+#            afio -Zinw $4 - < $3 2>&1
+            ;;
+    esac
+}
+
+
+
+# Helpers
+
+
+require_drivers ()
+{
+    for DRIVER in $@; do
+        local STATUS=`$DRIVER -test`
+        if [ "$STATUS" != "ok" ]; then
+            echo "ERROR: Archive driver not ready: $DRIVER"
+            echo $STATUS
+            exit 3
+        fi
+    done
+}
+
+
+get_driver_and_file ()           # Argument: <path>/<volname>.<bid>
+{
+    local DRIVER
+    for DRIVER in $USER_DRIVER_LIST $BUILTIN_DRIVER_LIST; do
+        local SUFFIX=`$DRIVER -suffix`
+        if [ "$SUFFIX" != "" -a -e "$1.$SUFFIX" ]; then
+            echo "$DRIVER:$1.$SUFFIX"
+            break
+        fi
+    done
+}
+
+
+get_driver ()                    # Argument: <path><volname><bid>
+{
+    local DRIVER_AND_FILE=`get_driver_and_file $1`
+    echo ${DRIVER_AND_FILE%%:*}
+}
+
+
+get_archive ()                   # Argument: <path><volname><bid>
+{
+    local DRIVER_AND_FILE=`get_driver_and_file $1`
+    echo ${DRIVER_AND_FILE##*:}
+}
+
+
+
+
+
+##################################################
+# (Un)mount backup disk and (un)lock volume
+
+
+MUST_BE_UNMOUNTED=0
+
+
+mount_dev ()
+{
+    if [ ! -d $BACKUP_DIR -a "$BACKUP_DEV" != "" ]; then
+        echo "Mounting $BACKUP_DEV..."
+        echo
+        mount $BACKUP_DEV
+        MUST_BE_UNMOUNTED=1
+    fi
+    if [ ! -d $BACKUP_DIR ]; then
+        echo "ERROR: $BACKUP_DIR not present (mount failed?)"
+        umount $BACKUP_DEV >& /dev/null
+        exit 3
+    fi
+    if [ -e $BACKUP_DIR/$VOLNAME.lock ]; then
+        if [ `ps -a | grep -af $BACKUP_DIR/$VOLNAME.lock | grep ${0##*/} | wc -l` -gt 0 ]; then
+            echo "ERROR: Backup volume is locked."
+            echo
+            echo "Another instance is currently running. If you are sure that this is not"
+            echo "the case, then remove the lock file '$BACKUP_DIR/$VOLNAME.lock' manually."
+            exit 3
+        fi
+    fi
+    echo $$ > $BACKUP_DIR/$VOLNAME.lock
+}
+
+
+umount_dev ()
+{
+    rm -f $BACKUP_DIR/$VOLNAME.lock
+    if [ $MUST_BE_UNMOUNTED == "1" ]; then
+        echo
+        echo "Unmounting $BACKUP_DEV..."
+        umount $BACKUP_DEV
+        MUST_BE_UNMOUNTED=0
+    fi
+}
+
+
+
+
+
+##################################################
+# Purging
+
+
+purge ()
+{
+    local LV=${#1}
+    : $[LV-=1]
+    local LASTDIG=${1:LV:1}
+    local PREFIX=${1%?}
+    if [[ $LV == 0 ]]; then
+        local CAND=$VOLNAME.$1*.list.gz
+    else
+        local CAND=$VOLNAME.$PREFIX[$LASTDIG-9]*.list.gz
+    fi
+    local ARCH BASE
+    for ARCH in $CAND; do
+        BASE=${ARCH%.list.gz}
+        echo "  removing <$BASE>"
+        rm -fr $BASE.*
+    done
+}
+
+
+name_cleanup ()
+{
+    local DST=0
+    local SRC=0
+    local SUFFIX SRC_FILE DST_FILE CHK
+    while [[ $SRC -lt 9 ]]; do
+        : $[SRC+=1]
+        if [[ -f $VOLNAME.$SRC.list.gz ]]; then
+            : $[DST+=1]
+            if [[ "$SRC" != "$DST" ]]; then
+                for SRC_FILE in $VOLNAME.$SRC* ; do
+                    local SUFFIX=${SRC_FILE##$VOLNAME.$SRC}
+                    local DST_FILE=$VOLNAME.$DST$SUFFIX
+                    if [ ${SUFFIX#*.} == "list.gz" ]; then
+                        echo "  moving <${SRC_FILE%.list.gz}> to <${DST_FILE%.list.gz}>"
+                    fi
+                    if [ ${SUFFIX#*.} == "new.gz" -a -h $SRC_FILE ]; then
+                        rm -fr $SRC_FILE
+                        do_symlink ${DST_FILE%.new.gz}.list.gz $DST_FILE
+                    else
+                        mv $SRC_FILE $DST_FILE
+                    fi
+                done
+                for CHK in $VOLNAME.$DST*.check ; do
+                    sed "s/ $VOLNAME.$SRC/ $VOLNAME.$DST/" < $CHK > $TMP.check
+                    mv $TMP.check $CHK
+                done
+            fi
+        fi
+    done
+}
+
+
+do_purge ()
+{
+    if [[ "$1" == "" ]]; then
+        echo "No archive specified - not purging anything!"
+    else
+        mount_dev
+        cd $BACKUP_DIR
+        BID_LIST=`expand_bid_list list.gz "$@"`
+        if [[ "$BID_LIST" == "" ]]; then
+            echo "No archive(s) matching '$@' found - nothing to purge."
+        else
+            echo "Purging <$BID_LIST>..."
+            for BID in $BID_LIST; do
+                purge $BID
+            done
+            name_cleanup
+         fi
+    fi
+}
+
+
+
+
+
+##################################################
+# Checking
+
+
+create_check ()
+{
+    # Parameter: single BID
+    local BID=$1
+    if [[ "${#BID}" == "1" ]]; then
+        local BASE_FILE=""
+    else
+        local BASE_FILE=$VOLNAME.`get_base_bid $BID`.list.gz
+    fi
+    echo "Creating check file for <$VOLNAME.$BID>..."
+    rm -f $VOLNAME.$BID.check
+    md5sum `find . -follow -path "*/$VOLNAME.$BID.*" -type f` $BASE_FILE > $TMP.check
+    mv $TMP.check $VOLNAME.$BID.check
+}
+
+
+do_create_check ()
+{
+    require_tools $COMMON_TOOLS md5sum
+
+    mount_dev
+    cd $BACKUP_DIR
+    rm -fr $TMP.*
+
+    if [[ "$1" == "" ]]; then
+        BID_LIST=`expand_bid_list list.gz "*"`
+    else
+        BID_LIST=`expand_bid_list list.gz "$@"`
+    fi
+    for BID in $BID_LIST; do
+        if [[ "$1" != "" || ! -f $VOLNAME.$BID.check ]]; then
+            create_check $BID
+        fi
+    done
+}
+
+
+check_arch ()
+{
+    # Parameter: single BID
+
+    local BID=$1
+    echo "Checking archive <$VOLNAME.$BID>..."
+
+    # Check the plausibility by file existence...
+    local SUFFIX
+    for SUFFIX in list.gz skipped.gz new.gz obsolete.gz error.gz; do
+        if [[ ! -f $VOLNAME.$BID.$SUFFIX ]]; then
+            echo "  ERROR: File '$VOLNAME.$BID.$SUFFIX' does not exist."
+        fi
+    done
+    if [[ ${#BID} -gt 1 ]]; then
+        if [[ ! -f $VOLNAME.`get_base_bid $BID`.list.gz ]]; then
+            echo "  ERROR: Base archive <$VOLNAME.`get_base_bid $BID`> does not exist."
+        fi
+    fi
+
+    # Check check sum file...
+    if [[ -f $VOLNAME.$BID.check ]]; then
+        md5sum -c $VOLNAME.$BID.check 2>&1 | sed 's/^/  /'
+        if [[ $(( `grep $VOLNAME.$BID. $VOLNAME.$BID.check | wc -l` )) -lt 6 ]]; then
+            echo "  ERROR: Check file seems to be corrupted."
+        fi
+    else
+        echo "  Information: no check file"
+    fi
+}
+
+
+do_check ()
+{
+    require_tools $COMMON_TOOLS md5sum
+
+    mount_dev
+    cd $BACKUP_DIR
+    rm -fr $TMP.*
+
+    if [[ "$1" == "" ]]; then
+        BID_LIST=`expand_bid_list list.gz "*"`
+    else
+        BID_LIST=`expand_bid_list list.gz "$@"`
+    fi
+    for BID in $BID_LIST; do
+        check_arch $BID
+    done
+}
+
+
+
+
+
+##################################################
+# Print summary
+
+
+show_summary ()
+{
+    require_tools $COMMON_TOOLS
+
+    echo "Summary"
+    echo "======="
+    echo
+    cd $BACKUP_DIR
+    if [[ `echo $VOLNAME.*.list.gz` == "" ]]; then
+        echo "No backup archives present."
+    else
+        echo "Backup       Date       Time  |  Size   | Skipped  Files+D |  New  Obs. | Err."
+        echo "------------------------------------------------------------------------------"
+        for f in `ls $VOLNAME.*.list.gz` ; do
+            p=${f%%.list.gz}
+            size="`du -sbL $p.* | readable_bytes_sum $SIZE_UNITS`"
+            skipped=$( gunzip -c $p.skipped.gz | wc -l )
+            total=$( gunzip -c $p.list.gz | wc -l )
+            new_files=$( gunzip -c $p.new.gz | wc -l )
+            obsolete=$( gunzip -c $p.obsolete.gz | wc -l )
+            errors=$( gunzip -c $p.error.gz | grep '<' | wc -l )
+            printf "%-12s %s %s |%8s |%8i %8i |%5i %5i |%5i\n" \
+                   $p $(date -r $p.list.gz +"%Y-%m-%d %H:%M") "$size" \
+                   $skipped $total $new_files $obsolete $errors
+        done
+    fi
+    echo
+    df -h $BACKUP_DIR
+}
+
+
+
+
+
+##################################################
+# backup
+
+
+compute_level_and_bids ()
+{
+    # Determine level and base BID for new backup...
+    if [ ! -f $VOLNAME.1.list.gz ]; then
+        LEVEL="0";
+    else
+        if [[ "$1" -gt 0 || "$1" == "0" ]]; then
+            LEVEL=$1
+        else
+            LEVEL=$MAX_LEVEL
+        fi
+        BASE_BID=`get_last_bid`
+        while [[ "$LEVEL" -gt 0 && "${BASE_BID:$LEVEL:1}" -gt "$[MAX_PER_LEVEL-1]" ]]; do
+            : $[LEVEL-=1]
+        done
+        BASE_BID=${BASE_BID:0:$[LEVEL+1]}
+        BASE_BID=${BASE_BID%%+(0)}
+    fi
+
+    # Determine new archive's name
+    if [ "$LEVEL" != "0" ]; then
+        NEW_BID=$BASE_BID
+        while [ ${#NEW_BID} -le $LEVEL ]; do
+            NEW_BID=${NEW_BID}"0"
+        done
+        : $[NEW_BID+=1]
+    else
+        NEW_BID="1"
+        while [ -f $VOLNAME.$NEW_BID.list.gz ]; do
+            : $[NEW_BID+=1]
+        done
+    fi
+}
+
+
+prepare_backup ()
+{
+    # Input: Comment ("Preparing"/"Estimating"), selected level (optional)
+    # Output: $LEVEL, $BASE_BID, $NEW_BID
+    #         $TMP.list $TMP.skipped $TMP.new $TMP.obsolete $TMP.files
+
+    # Determine level, base BID and new BID
+    compute_level_and_bids $2
+    if [ "$LEVEL" != "0" ]; then
+        echo "$1 differential level-$LEVEL backup <$VOLNAME.$NEW_BID> based on <$VOLNAME.$BASE_BID>..."
+    else
+        echo "$1 full backup <$VOLNAME.$NEW_BID>..."
+    fi
+
+    # Determine main list & which files are new or obsolete...
+    set -f  # pathname expansion off as it may destroy $SKIPCOND
+    OLDIFS=$IFS
+    IFS=""
+    find ${SRCLIST[*]} \( \( ${SKIPCOND[*]} \) \
+        \( -type d -fprintf $TMP.skipped.dirs "$FORMAT/\n" -o -fprintf $TMP.skipped.files "$FORMAT\n" \) \) \
+        -o \( -not -type d -printf "$FORMAT\n" -o -printf "$FORMAT/\n" \) \
+        | sed -e 's#   \([0-9]*\..* /.*\)# 00\1#' -e 's#  \([0-9]*\..* /\)# 0\1#' \
+              -e 's#\(\. *\)  \([0-9 ]* /\)#\100\2#' -e 's#\. \([0-9 ]* /\)#\.0\1#' \
+        | sort -k 6 \
+        > $TMP.list
+    IFS=$OLDIFS
+    cat $TMP.skipped.dirs $TMP.skipped.files \
+        | sed -e 's#   \([0-9]*\..* /.*\)# 00\1#' -e 's#  \([0-9]*\..* /\)# 0\1#' \
+              -e 's#\(\. *\)  \([0-9 ]* /\)#\100\2#' -e 's#\. \([0-9 ]* /\)#\.0\1#' \
+        | sort -k 6 \
+        > $TMP.skipped
+          # WORKAROUND: The reason for the two 2-line sed's above is a bug in find 4.1.7, where the format
+          #             directives %04x do not produce leading 0's.
+    set +f
+    if [ $LEVEL != 0 ]; then
+        gunzip -c $VOLNAME.$BASE_BID.list.gz | sort -k 6 | diff - $TMP.list > $TMP.diff
+          # WORKAROUND: 'sort -k 6' can be removed if sort uses the same options for every user,
+          #             which seems to be not the case!!
+        if [[ $(( `grep "<" $TMP.diff | tail -n 1 | sed 's# /.*##' | wc -w` )) == 5 ]]; then
+            echo "  file '$VOLNAME.$BASE_BID.list.gz' has an old format - using compatibility mode"
+            sed 's#[0-9]*\.[0-9 ]* /#- /#' < $TMP.list > $TMP.list.old
+            gunzip -c $VOLNAME.$BASE_BID.list.gz | sort -k 5 | diff - $TMP.list.old > $TMP.diff
+        fi
+        grep "<" $TMP.diff | sed 's/^< //' > $TMP.obsolete
+        grep ">" $TMP.diff | sed 's/^> //' > $TMP.new
+    else
+        # by convention, the *.new and *.obsolete files always exist, although redundant for level-0 backups
+        do_symlink $TMP.list $TMP.new
+        touch $TMP.obsolete
+    fi
+    eval "$FILTER_NAME" < $TMP.new | grep -v "/$" > $TMP.files   # extract real files
+
+    # Print statistics...
+    echo " " `wc -l < $TMP.files` / `grep -v '/$' $TMP.list | wc -l` "file(s)," \
+        `grep '/$' $TMP.new | wc -l` / `grep '/$' $TMP.list | wc -l` "dir(s)," \
+        `grep -v '/$' $TMP.new | readable_bytes_sum`"B /" \
+        `grep -v '/$' $TMP.list | readable_bytes_sum`"B (uncompressed)"
+    echo "  skipping:" `grep -v '/$' $TMP.skipped | wc -l` "file(s)," \
+        `grep '/$' $TMP.skipped | wc -l` "dir(s)," \
+        `grep -v '/$' $TMP.skipped | readable_bytes_sum`"B (uncompressed)"
+}
+
+
+show_backup_estimates ()
+{
+    require_tools $COMMON_TOOLS
+
+    mount_dev
+    cd $BACKUP_DIR
+    rm -fr $TMP.*
+    prepare_backup "Estimating" $1
+    rm -f $TMP.*
+}
+
+
+do_backup ()
+{
+    require_tools $COMMON_TOOLS
+    require_drivers $CREATE_DRIVER
+
+    # Print time stamp & mount backup drive...
+    date
+    echo
+    mount_dev
+
+    # Run pre-backup
+    echo "Running pre-backup procedure..."
+    PRE_BACKUP
+
+    # Operate in destination directory
+    cd $BACKUP_DIR
+    rm -fr $TMP.*
+
+    # Remove old backups...
+    echo
+    echo "Removing old backups..."
+    name_cleanup  # should not do anything in normal cases
+    compute_level_and_bids $1
+    SAVED_LEVEL=$LEVEL
+
+    # Rotate level-0 backups if necessary...
+    TOO_MANY=$(( ${NEW_BID:0:1} - $MAX_FULL ))
+    if [[ $TOO_MANY -gt 0 ]]; then
+        N=0
+        while [[ $N -lt $TOO_MANY ]]; do
+            : $[N+=1]
+            purge $N
+        done
+        name_cleanup
+        compute_level_and_bids $SAVED_LEVEL
+    fi
+
+    # Remove old differential backups...
+    if [[ $BASE_BID -gt 0 ]]; then
+        ARCH_LIST=(`ls $VOLNAME.*1.list.gz`)
+        LV=0
+        while [ $LV -le 10 ]; do
+            : $[LV+=1]
+            MATCHCNT=0
+            N=${#ARCH_LIST[*]}
+            while [[ $N -gt 0 ]]; do
+                : $[N-=1]
+                BID=`get_bid_of_name ${ARCH_LIST[$N]}`
+                if [[ ${#BID} == $[LV+1] && ${BID:0:$LV} != ${NEW_BID:0:$LV} ]]; then
+                    : $[MATCHCNT+=1]
+                    if [[ $MATCHCNT -gt $GENERATIONS ]]; then
+                        purge $BID
+                    fi
+                fi
+            done
+        done
+    fi
+
+    # Prepare backup...
+    echo
+    prepare_backup "Preparing" $SAVED_LEVEL
+
+    # Create and verify archive file...
+    echo
+    echo "Creating archive using '"$CREATE_DRIVER"'..."
+    ARCH_SUFFIX=`$CREATE_DRIVER -suffix`
+    $CREATE_DRIVER -create $NEW_BID $TMP.$ARCH_SUFFIX $TMP.files 2>&1 | sed 's/^/  /'
+    if [ "$ARCH_SUFFIX" != "" ]; then
+        echo "Checking TOC of archive file (< real file, > archive entry)..."
+        $CREATE_DRIVER -toc $NEW_BID $TMP.$ARCH_SUFFIX | eval "$FILTER_UNIFY_NAME" > $TMP.toc
+        eval "$FILTER_UNIFY_NAME" < $TMP.files | diff - $TMP.toc | tee $TMP.error | sed 's/^/  /'
+    fi
+
+    # Move files in place...
+    gzip -9 $TMP.list $TMP.skipped $TMP.obsolete $TMP.error
+    if [ $LEVEL != 0 ]; then
+        gzip -9 $TMP.new
+    else
+        rm -f $TMP.new
+            # Here we don't use the do_symlink function because we need to copy or
+            # symlink different files, depending on wether we copy or symlink
+        ln -s $VOLNAME.$NEW_BID.list.gz $TMP.new.gz &> /dev/null ||
+        cp -af $TMP.list.gz $TMP.new.gz
+    fi
+    for SUFFIX in skipped.gz new.gz obsolete.gz error.gz $ARCH_SUFFIX list.gz ; do
+        # *.list.gz has to be the last for transaction safety
+        mv $TMP.$SUFFIX $VOLNAME.$NEW_BID.$SUFFIX
+    done
+
+    # Create check file if requested...
+    if [[ "$CREATE_CHECK_FILE" == "1" ]]; then
+        create_check $NEW_BID
+    fi
+
+    # Run post-backup
+    echo
+    echo "Running post-backup procedure..."
+    POST_BACKUP
+
+    # print summary and finish...
+    rm -f $TMP.*
+    echo
+    date
+    echo
+    echo
+    show_summary
+}
+
+
+
+
+
+##################################################
+# show_availability
+
+
+show_availability ()
+{
+    # parameters: masks
+
+    require_tools $COMMON_TOOLS
+
+    mount_dev 1>&2
+    cd $BACKUP_DIR
+    rm -fr $TMP.*
+
+    MASK="$@"
+    if [ "$MASK" = "" ]; then
+        MASK="/"
+    fi
+
+    echo "Listing available files..." 1>&2
+    for F in $VOLNAME.*.list.gz; do
+        BID=`get_bid_of_name $F`
+        FBID=$BID
+        while [[ ${#FBID} -lt 5 ]]; do
+            FBID=$FBID" "
+        done
+        for X in "$MASK"; do
+           gunzip -c $VOLNAME.$BID.obsolete.gz | grep "$X" | sed "s/^/$VOLNAME.$FBID - /"
+           gunzip -c $VOLNAME.$BID.new.gz | grep "$X" | sed "s/^/$VOLNAME.$FBID + /"
+        done
+    done
+    cd /
+    umount_dev 1>&2
+}
+
+
+
+
+
+##################################################
+# show_location
+
+
+get_location ()
+{
+    # parameter 1: BID of snapshot
+    # other parameters: masks
+
+    if [[ $1 == "head" ]]; then
+        BID=`get_last_bid`
+    else
+        BID=$1
+    fi
+    if [[ ! -f $VOLNAME.$BID.list.gz ]]; then
+        echo "ERROR: Specified backup archive <$VOLNAME.$BID> does not exist!"
+        exit 3
+    fi
+    shift
+
+    MASK_LIST="$@"
+    if [ "$MASK_LIST" = "" ]; then
+        MASK_LIST="/"
+    fi
+
+    # determine active files...
+    for MASK in "$MASK_LIST"; do
+        gunzip -c $VOLNAME.$BID.list.gz | grep "$MASK" | tee $TMP.found | grep '/$' >> $TMP.dirs
+            # dirs go to $TMP.dirs WITH attributes
+        grep -v '/$' $TMP.found | eval "$FILTER_NAME" >> $TMP.left
+            # files go to $TMP.left WITHOUT attributes
+    done
+    echo "Active files in <$VOLNAME.$BID>:" `wc -l < $TMP.left`
+
+    sort < $TMP.left > $TMP.nowleft
+    mv $TMP.nowleft $TMP.left
+
+    # generate location list
+    LAST_BID="xxx"
+    touch $TMP.located
+    touch $TMP.archlist
+    touch $TMP.noarch
+    while [ ${#LAST_BID} -gt 1 -a `wc -l < $TMP.left` -gt 0 ]; do
+        gunzip -c $VOLNAME.$BID.new.gz | eval "$FILTER_NAME" | sort | comm -1 -2 - $TMP.left | tee $TMP.found \
+            | comm -1 -3 - $TMP.left > $TMP.nowleft
+        local FOUND=`wc -l < $TMP.found`
+        printf "  found in %-12s%5i   (%5i left)\n" \
+            "$VOLNAME.$BID:" $FOUND `wc -l < $TMP.nowleft`
+        if [ "$FOUND" -gt 0 ]; then
+            sed "s/^/$VOLNAME.$BID: /" < $TMP.found >> $TMP.located
+            mv $TMP.nowleft $TMP.left
+            DRIVER=`get_driver $VOLNAME.$BID`
+            if [ "$DRIVER" = "" ]; then
+                echo $VOLNAME.$BID >> $TMP.noarch
+            else
+                echo $VOLNAME.$BID:$DRIVER >> $TMP.archlist
+            fi
+        fi
+        LAST_BID=$BID
+        BID=`get_base_bid $LAST_BID`
+    done
+    echo
+    # leaves $TMP.left, $TMP.found, $TMP.located, $TMP.dirs, $TMP.archlist, $TMP.noarch
+}
+
+
+show_location ()
+{
+    # parameter 1: BID of snapshot
+    # other parameters: masks
+
+    require_tools $COMMON_TOOLS comm
+
+    mount_dev 1>&2
+    cd $BACKUP_DIR
+    rm -fr $TMP.*
+
+    get_location "$@" 1>&2
+    echo "Listing locations..." 1>&2
+    cat $TMP.located
+    sed 's#^#NOT FOUND: #' < $TMP.left
+
+    if [ `wc -l < $TMP.noarch` -gt 0 ]; then
+        echo -e "\nTo restore, the archive files of the following backups are missing and" \
+                "\nhave to be copied or linked into $BACKUP_DIR:" 1>&2
+        sed 's#^#  #' < $TMP.noarch 1>&2
+    else
+        echo -e "\nAll required archive files are present in $BACKUP_DIR." 1>&2
+    fi
+
+    rm -f $TMP.*
+    cd /
+    umount_dev 1>&2
+}
+
+
+
+
+
+##################################################
+# do_restore
+
+
+do_restore ()
+{
+    # parameter 1: <level>.<version> of snapshot
+    # other parameters: masks
+
+    require_tools $COMMON_TOOLS comm
+
+    mount_dev
+    pushd $BACKUP_DIR > /dev/null
+    rm -fr $TMP.*
+
+    # determine which file to get from which archive
+    get_location "$@"
+
+    popd > /dev/null
+
+    if [ `wc -l < $BACKUP_DIR/$TMP.noarch` -gt 0 ]; then
+        echo "Cannot access archive file(s) of the following backup(s):"
+        sed 's#^#  #' < $BACKUP_DIR/$TMP.noarch
+        echo -e "\nNothing has been restored."
+    else
+
+        # check availability of all required drivers in advance...
+        require_drivers `sed 's#^.*:##' < $BACKUP_DIR/$TMP.archlist`
+
+        # create directories...
+        DIRS=`wc -l < $BACKUP_DIR/$TMP.dirs`
+        if [ $DIRS -gt 0 ]; then
+            echo "Restoring" $DIRS "directories..."
+            eval "$FILTER_NAME" < $BACKUP_DIR/$TMP.dirs | sed 's#^/\(.*\)$#"\1"#' | xargs -l1 mkdir -p
+            eval "$FILTER_CHMOD" < $BACKUP_DIR/$TMP.dirs | xargs -l1 chmod
+            eval "$FILTER_CHOWN" < $BACKUP_DIR/$TMP.dirs | xargs -l1 chown
+        fi
+
+        # process all archives...
+        echo "Restoring files..."
+        for ARCH_AND_DRIVER in `cat $BACKUP_DIR/$TMP.archlist`; do
+            ARCH=${ARCH_AND_DRIVER%%:*}
+            BID=${ARCH#$VOLNAME.}
+            DRIVER=${ARCH_AND_DRIVER##*:}
+            SUFFIX=`$DRIVER -suffix`
+            grep "^$ARCH:" $BACKUP_DIR/$TMP.located \
+                | sed -e "s#^$ARCH: /##" -e 's#\([][*?]\)#\\\1#g' \
+                > $BACKUP_DIR/$TMP.curlist
+                # The second sed expression escapes special glob(7) characters ([]*?).
+            FILES=`wc -l < $BACKUP_DIR/$TMP.curlist`
+            echo "  $ARCH.$SUFFIX:" $FILES "file(s) using '"$DRIVER"'"
+            $DRIVER -extract $BID $BACKUP_DIR/$ARCH.$SUFFIX $BACKUP_DIR/$TMP.curlist | sed "s/^/    /"
+        done
+    fi
+
+    # Cleanup...
+    rm -f $BACKUP_DIR/$TMP.*
+}
+
+
+
+##################################################
+# External archiving
+
+
+do_external ()
+{
+    require_tools $COMMON_TOOLS split tail md5sum
+
+    CTRL_EXPR="$VOLNAME\.[0-9]*\.((list)|(new)|(obsolete)|(skipped)|(error)|(check))"
+    mount_dev
+
+    CAPACITY=$(( $1 * 1024 ))
+    shift
+    MAXFREE=$(( $1 * 1024 ))
+    shift
+
+    # determine BID_LIST...
+    BID_LIST=`expand_bid_list list.gz "$@"`
+
+    # determine distribution...
+    LAST_DISK=1
+    REMAINING=$CAPACITY
+    rm -f TMP.xdist 2> /dev/null
+    touch TMP.xdist
+    for BID in $BID_LIST; do
+        CTRL_SIZE=`ls -1s $BACKUP_DIR/$VOLNAME.$BID.* | grep -E "$CTRL_EXPR" \
+            | awk '{ sum += $1 } END { print sum }'`
+        if [ $CTRL_SIZE -gt $REMAINING -a $REMAINING -lt $CAPACITY ]; then
+            : $[ LAST_DISK += 1 ]
+            REMAINING=$CAPACITY
+        fi
+        LAST_DISK_DIR=`printf "data-%02d" $LAST_DISK`
+        ls -1s $BACKUP_DIR/$VOLNAME.$BID.* | grep -E "$CTRL_EXPR" \
+            | sed "s#$BACKUP_DIR#$LAST_DISK_DIR#" >> TMP.xdist
+        : $[ REMAINING -= $CTRL_SIZE ]
+        for ARCHIVE_PATH in `ls -1d $BACKUP_DIR/$VOLNAME.$BID.* | grep -vE "$CTRL_EXPR"`; do
+            ARCHIVE=${ARCHIVE_PATH##*/}
+            if [ -f $BACKUP_DIR/$ARCHIVE ]; then
+                DATA_SIZE=`ls -1s $BACKUP_DIR/$ARCHIVE | sed 's/ [^ ]*$//'`
+                if [ $DATA_SIZE -gt $REMAINING -a $REMAINING -lt $MAXFREE ]; then
+                    : $[ LAST_DISK += 1 ]
+                    REMAINING=$CAPACITY
+                fi
+                if [ $DATA_SIZE -le $REMAINING ]; then
+                    LAST_DISK_DIR=`printf "data-%02i" $LAST_DISK`
+                    ls -1s $BACKUP_DIR/$ARCHIVE | sed "s#$BACKUP_DIR#$LAST_DISK_DIR#" >> TMP.xdist
+                    : $[ REMAINING -= $DATA_SIZE ]
+                else
+                    SPLIT_NO=1
+                    while [ $DATA_SIZE -gt $REMAINING ]; do
+                        LAST_DISK_DIR=`printf "data-%02i" $LAST_DISK`
+                        printf "%4i $LAST_DISK_DIR/$ARCHIVE.%02i\n" $REMAINING $SPLIT_NO >> TMP.xdist
+                        : $[ DATA_SIZE -= $REMAINING ]
+                        : $[ SPLIT_NO += 1 ]
+                        : $[ LAST_DISK += 1 ]
+                        REMAINING=$CAPACITY
+                    done
+                    LAST_DISK_DIR=`printf "data-%02i" $LAST_DISK`
+                    printf "%4i $LAST_DISK_DIR/$ARCHIVE.%02i\n" $DATA_SIZE $SPLIT_NO >> TMP.xdist
+                    : $[ REMAINING -= $DATA_SIZE ]
+                fi
+            else
+                echo "WARNING: Cannot handle directory: $ARCHIVE (skipping)"
+                echo
+            fi
+        done
+    done
+
+    SPACE=$(( (`grep "\.[0-9]*$" TMP.xdist | awk '{ sum += $1 } END { print sum }'` + 1023) / 1024 ))
+    cat << EOT
+I am about to split and combine the selected backup archives into directories
+of equal size, so that they can be stored on a set of removable media
+(e. g. CDs). If 'cdlabelgen' is installed, I will create CD covers.
+It is up to you to burn the CDs or store the data in whichever way you like.
+
+All files are generated in the current working directory ($PWD).
+Make sure it is empty!
+
+In order to save disk space, only symbolic links will be generated wherever
+possible. Make sure that they are followed by your CD-burn/storage tool and
+that the backup device is mounted!
+
+You have selected a medium capacity of $(( $CAPACITY / 1024 )) MB with a maximum waste of $(( $MAXFREE /1024 )) MB
+per medium. The selected BIDs are:
+
+  $BID_LIST
+
+I need about $SPACE MB of disk space in the current directory.
+You will get $LAST_DISK volume(s).
+
+EOT
+    read -p "Do you want to see details? [y/N] " ANSWER
+    if [[ "$ANSWER" == "y" ]]; then
+        echo -e "\nSize  Volume/File\n======================================="
+        cat TMP.xdist
+    fi
+    echo
+    read -p "Do you want to continue? [y/N] " ANSWER
+    if [[ "$ANSWER" != "y" ]]; then
+        rm -f TMP.xdist
+        return
+    fi
+
+    echo -e "\nCreating links..."
+    rm -fr data-??
+
+    # create directories...
+    sed -e 's#^[ 0-9]*##' -e 's#/.*$##' < TMP.xdist | sort -u | xargs -l1 mkdir -p
+
+    # create links...
+    for FILE in `grep -v '\.[0-9]*$' TMP.xdist | sed 's#^[ 0-9]*##'`; do
+        do_symlink $BACKUP_DIR/${FILE#data-??/} $FILE
+    done
+
+    echo "Splitting large files..."
+    for FILE in `grep '\.01$' TMP.xdist | sed -e 's#^[ 0-9]*##' -e 's#.01$##'`; do
+        ORG_FILE=${FILE#data-??/}
+        echo "  $ORG_FILE"
+        HEAD_SIZE=$(( `grep $FILE TMP.xdist | sed 's/ [^ ]*$//'` * 1024 ))
+        head $BACKUP_DIR/$ORG_FILE -c $HEAD_SIZE > $FILE.01
+        tail $BACKUP_DIR/$ORG_FILE -c +$(( $HEAD_SIZE + 1 )) | split -b $(( $CAPACITY * 1024 )) - TMP.split.
+        SPLIT_NO=2
+        for SPLIT in `ls -1 TMP.split.*`; do
+            DST_FILE=`printf "$ORG_FILE.%02i" $SPLIT_NO`
+            DST=`grep $DST_FILE TMP.xdist | sed 's#^[ 0-9]*##'`
+            mv $SPLIT $DST
+            : $[ SPLIT_NO += 1 ];
+        done
+    done
+
+    # create self-check files...
+    cat << EOT
+
+I can now generate check scripts for each volume that can later be used to
+verify the integrity of all files. This is e.g. useful if, in a couple of
+years, you want to know whether your backup media are still readable.
+Then simply mount your media and type '. check_these_files.sh' inside the
+media's main directory.
+
+EOT
+    read -p "Create self-check scripts? [Y/n] " ANSWER
+    if [[ "$ANSWER" != "n" ]]; then
+        echo
+        echo "Creating self-check scripts..."
+        for DISK in data-??; do
+            echo "  $DISK"
+            cd $DISK
+
+            DST_FILE="check_these_files.sh"
+            rm -f $DST_FILE
+            FILES=`find . -follow -type f`
+            echo "#!/bin/sh" > $DST_FILE
+            echo >> $DST_FILE
+            echo "echo \"This script has been auto-generated by backup2l v$VER.\"" >> $DST_FILE
+            echo "echo \"Verifying file(s) using md5sum(1)...\"" >> $DST_FILE
+            echo >> $DST_FILE
+            echo "md5sum -v -c << EOF" >> $DST_FILE
+            md5sum $FILES >> $DST_FILE
+            echo "EOF" >> $DST_FILE
+
+            cd ..
+        done
+    fi
+
+    # create CD labels
+    if which cdlabelgen > /dev/null; then
+      echo
+      echo "Creating CD labels..."
+      read -p "  Enter CD title [Backup]: " ANSWER
+      if [[ "$ANSWER" == "" ]]; then
+          ANSWER="Backup"
+      fi
+      if [ -r /usr/share/cdlabelgen/penguin.eps ]; then
+          TRAYPIC="-e /usr/share/cdlabelgen/penguin.eps -S 0.5"
+      else
+          TRAYPIC=""
+      fi
+      for DISK in data-??; do
+          DISK_NO=${DISK#data-}
+          echo -e "\nContents\n========\n" > contents-$DISK_NO.txt
+          grep $DISK TMP.xdist | sed -e 's#^.*/##' -e 's#\.list\.gz# - control files#' \
+              | grep -vE "$CTRL_EXPR" >> contents-$DISK_NO.txt
+          cdlabelgen -c "$ANSWER" -s "${DISK_NO#0} of $LAST_DISK" -d `date -I` \
+              -f contents-$DISK_NO.txt $TRAYPIC -o cd-cover-$DISK_NO.ps
+      done
+    fi
+
+    # clean up
+    rm -f TMP.xdist
+}
+
+
+
+
+
+##################################################
+# Usage & banner
+
+
+banner ()
+{
+    echo backup2l v$VER by Gundolf Kiefer
+    echo
+}
+
+
+usage ()
+{
+    banner
+    cat << EOF
+Usage: backup2l [-c <conffile>] [-t <BID>] <command>
+Where
+    -c | --conf <conffile>         : specifies configuration file [/etc/backup2l.conf]
+    -t | --time <BID>              : specifies backup ID as a point-in-time for --locate and --restore
+
+  <command>:
+    -h | --help                    : Help
+    -b | --backup [<level>]        : Create new backup
+    -e | --estimate [<level>]      : Like -b, but nothing is really done
+    -s | --get-summary             : Show backup summary
+
+    -a | --get-available <pattern> : Show all files in all backups containing <pattern> in their path names
+    -l | --locate [<pattern>]      : Show most recent backup location of all active files matching <pattern>
+    -r | --restore [<pattern>]     : Restore active files matching <pattern> into current directory
+
+    -p | --purge <BID-list>        : Remove the specified backup archive(s) and all depending backups
+
+    -v | --verify [<BID-list>]     : Verify the specified / all backup archive(s)
+    -m | --make-check [<BID-list>] : Create md5 checksum file for the specified archive(s) / wherever missing
+
+    -x | --extract <volume size> <max free> <BID-list> :
+                                     Split and collect files to be stored on removable media (e. g. CDs)
+
+EOF
+    echo "Built-in archive drivers:" $BUILTIN_DRIVER_LIST
+    if [ "$USER_DRIVER_LIST" != "" ]; then
+        echo "User-defined drivers:    " $USER_DRIVER_LIST
+    fi
+}
+
+
+
+
+
+##################################################
+# Main
+
+
+shopt -s nullglob
+shopt -s extglob
+unset LANG LC_ALL LC_COLLATE # otherwise: unpredictable sort order in sort, ls
+
+
+# Set defaults...
+CREATE_DRIVER="DRIVER_TAR_GZ"  # works with last stable version 1.01
+
+# Read & validate setup...
+CONF_FILE="/etc/backup2l.conf"
+if [ "$1" = "-c" -o "$1" = "--conf" ]; then
+    shift
+    CONF_FILE=$1
+    shift
+fi
+if [ -f "$CONF_FILE" ]; then
+    . $CONF_FILE
+else
+  echo "Could not open configuration file '$CONF_FILE'. Aborting."
+  exit 3
+fi
+
+if [ "$UNCONFIGURED" = "1" ]; then
+    banner
+    echo -e "The configuration file '$CONF_FILE' has to be edited before using ${0##*/}.\n"
+    echo -e "For help, look into the comments or read the man page.\n"
+    exit 3
+fi
+if [ "$VOLNAME" = "" -o "$SRCLIST" = "" -o "${SKIPCOND[*]}" = "" -o "$BACKUP_DIR" = "" -o \
+     "$MAX_LEVEL" = "" -o "$MAX_PER_LEVEL" = "" -o "$MAX_FULL" = "" ]; then
+    echo "ERROR: The configuration file '$CONF_FILE' is missing or incomplete."
+    exit 3
+fi
+
+if [ "$FOR_VERSION" = "" ]; then
+    FOR_VERSION="0.9"
+fi
+if [[ "$FOR_VERSION" < "1.1" || "$FOR_VERSION" > "${VER%-*}" ]]; then
+    banner
+    cat << EOF
+The configuration file '$CONF_FILE' seems to be written for
+version $FOR_VERSION and may be incompatible with this version of backup2l.
+
+The following variables have been added, removed or their syntax may have
+changed. Details can be found in first_time.conf and the man page.
+
+  1.1 : CREATE_DRIVER, USER_DRIVER_LIST
+  0.93: POST_BACKUP
+  0.91: SRCLIST, SKIPCOND, FOR_VERSION
+
+If you think your configuration file is correct, please change the value
+of FOR_VERSION.
+EOF
+    exit 3
+fi
+TMP="TMP.$VOLNAME"
+
+# Read time point if given
+if [ "$1" = "-t" -o "$1" = "--time" ]; then
+    shift
+    BID=${1#$VOLNAME.}
+    shift
+else
+    BID="head"
+fi
+
+# Go ahead...
+case $1 in
+    -h | --help)
+        usage
+        ;;
+    -e | --estimate)
+        banner
+        show_backup_estimates "$2"
+        ;;
+    -b | --backup)
+        banner
+        do_backup "$2"
+        ;;
+    -s | --get-summary)
+        banner
+        mount_dev
+        show_summary
+        ;;
+    -a | --get-available)
+        banner 1>&2
+        shift
+        show_availability "$@"
+        ;;
+    -l | --locate)
+        banner 1>&2
+        shift
+        show_location $BID "$@"
+        ;;
+    -r | --restore)
+        banner
+        shift
+        do_restore $BID "$@"
+        ;;
+    -p | --purge)
+        banner
+        shift
+        do_purge "$@"
+        ;;
+    -v | --verify)
+        banner
+        shift
+        do_check "$@"
+        ;;
+    -m | --make-check)
+        banner
+        shift
+        do_create_check "$@"
+        ;;
+    -x | --extract)
+        banner
+        shift
+        if [[ "$3" == "" ]]; then
+            usage
+        else
+            do_external "$@"
+        fi
+        ;;
+    *)
+        if [ "$AUTORUN" = "1" ]; then
+            banner
+            do_backup
+        else
+            usage
+        fi
+        ;;
+esac
+
+# Unmount backup device if it was mounted
+cd /            # avoid "device is busy" during unmount
+umount_dev

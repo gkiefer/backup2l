@@ -1,0 +1,32 @@
+Source: backup2l
+Section: admin
+Priority: optional
+Maintainer: Gundolf Kiefer <gundolfk@web.de>
+Standards-Version: 3.6.1
+
+Package: backup2l
+Architecture: all
+Depends: findutils (>= 2.1)
+Recommends: tar (>= 1.13.17) | afio (>= 2.4.7)
+Suggests: bzip2 (>= 1.0.2), cdlabelgen
+Description: low-maintenance backup/restore tool for mountable media
+ backup2l [backup-too-l] is a tool for autonomously generating, maintaining
+ and restoring backups on a mountable file system (e. g. hard disk). In a
+ default installation, backups are created regularly by a cron script.
+ .
+ The main design goals are low maintenance effort, efficiency, transparency
+ and robustness. All control files are stored together with the archives on
+ the backup device, and their contents are mostly self-explaining. Hence, a
+ user can - if necessary - browse the files and extract archives manually.
+ .
+ backup2l features differential backups at multiple hierarchical levels.
+ This allows to generate small incremental backups at short intervals while
+ at the same time, the total number of archives only increases
+ logarithmically with the number of backups since the last full backup.
+ .
+ An open driver architecture allows to use virtually any archiving
+ program as a backend. Built-in drivers support .tar.gz, .tar.bz2, or .afioz
+ files. Further user-defined drivers can be added.
+ .
+ An integrated split-and-collect function allows to comfortably transfer all
+ or selected archives to a set of CDs or other removable media.

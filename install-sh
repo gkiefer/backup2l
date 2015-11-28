@@ -1,0 +1,134 @@
+#!/bin/bash
+
+set -e
+
+NO_PROMPT=0
+TOUCH_CONF=1
+UNINST=0
+case $1 in
+    -f)
+    	NO_PROMPT=1
+        TOUCH_CONF=0
+        shift
+        ;;
+    -fc)
+    	NO_PROMPT=1
+        shift
+    	;;
+    -u)
+    	NO_PROMPT=1
+        UNINST=1
+        TOUCH_CONF=0
+        shift
+    	;;
+    -uc)
+    	NO_PROMPT=1
+        UNINST=1
+        shift
+        ;;
+esac
+
+if [[ "$1" != "" ]]; then
+    PREFIX=${1%/}
+else
+    PREFIX="/usr/local"
+fi
+if [[ "$2" != "" ]]; then
+    PREFIX_BIN=${2%/}
+else
+    PREFIX_BIN="$PREFIX/bin"
+fi
+if [[ "$3" != "" ]]; then
+    PREFIX_CONF=${3%/}
+else
+    PREFIX_CONF="/etc"
+fi
+
+if [[ "$NO_PROMPT" == "0" ]]; then
+    cat << EOF
+Usage: install-sh [ -f | -fc | -u | -uc ] [ <prefix> ] [ <bin-prefix> ] [ <conf-prefix> ]
+Where
+    -f:  (Re-)Install program
+    -fc: (Re-)Install program and configuration files
+    -u:  Uninstall program
+    -uc: Uninstall program and configuration files
+
+    <prefix>:      Location (default: /usr/local)
+    <bin-prefix>:  Location for binary files (default: <prefix>/bin)
+    <conf-prefix>: Location for configuration files (default: /etc)
+
+
+EOF
+fi
+
+CRON_FILE=""
+if [[ "$TOUCH_CONF" == "1" ]]; then
+    if [ -d $PREFIX_CONF/cron.daily ]; then
+        # standard cron/daily path for some Linux's...
+        CRON_FILE=$PREFIX_CONF/cron.daily/zz-backup2l
+    elif [ -d $PREFIX_CONF/periodic/daily ]; then
+        # standard cron/daily path for Mac OS X...
+        CRON_FILE=$PREFIX_CONF/periodic/daily/zz-backup2l
+    fi
+fi
+
+PROG_FILES="$PREFIX_BIN/backup2l $PREFIX/man/man8/backup2l.8.gz"
+CONF_FILES="$PREFIX_CONF/backup2l.conf $CRON_FILE"
+
+if [[ "$UNINST" == "0" ]]; then
+
+    # Installation...
+    if [[ "$NO_PROMPT" == "0" ]]; then
+        echo -e "I am about to install the following program file(s):\n  $PROG_FILES\n"
+        read -p "Do you want to continue? [y/N] " ANSWER
+        echo
+        if [[ "$ANSWER" != "y" ]]; then
+            echo "Stopping."
+            exit 1
+        fi
+    fi
+
+    mkdir -p $PREFIX_BIN $PREFIX/man/man8
+    cp -af backup2l $PREFIX_BIN
+    gzip -9 -c backup2l.8 > $PREFIX/man/man8/backup2l.8.gz
+    echo "Program files installed."
+
+    if [[ "$TOUCH_CONF" == "1" && "$NO_PROMPT" == "0" ]]; then
+        echo -e "\nI can install the following configuration file(s):\n  $CONF_FILES\n"
+        echo "This is recommended for a first-time installation."
+        echo -e "Warning: Previously existing files will be overwritten!\n"
+        read -p "Do you want to continue? [y/N] " ANSWER
+        echo
+        if [[ "$ANSWER" != "y" ]]; then
+            TOUCH_CONF=0
+        fi
+    fi
+
+    if [[ "$TOUCH_CONF" == "1" ]]; then
+        mkdir -p $PREFIX_CONF
+        cp -af first-time.conf $PREFIX_CONF/backup2l.conf
+        echo "Configuration files installed."
+        if [[ "$CRON_FILE" != "" ]]; then
+            cp -af zz-backup2l $CRON_FILE
+        else
+            echo -e "\nNote: No suitable cron directory found - file 'zz-backup2l' not (un-)installed automatically."
+        fi
+    else
+        echo "No configuration files installed."
+    fi
+
+else
+
+    # Un-installation...
+    echo "Removing program file(s): $PROG_FILES"
+    rm -f $PROG_FILES
+    if [[ "$TOUCH_CONF" == "1" ]]; then
+        echo "Removing configuration file(s): $CONF_FILES"
+        rm -f $CONF_FILES
+        if [[ "$CRON_FILE" == "" ]]; then
+            echo -e "\nNote: Cron directory not found - eventually remove 'zz-backup2l' manually."
+        fi
+    else
+        echo "Configuration files NOT removed."
+    fi
+fi

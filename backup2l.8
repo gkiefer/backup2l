@@ -1,0 +1,304 @@
+.TH BACKUP2L 8 "Dec 2009" "backup2l v1.5"
+
+.SH NAME
+backup2l \-  low-maintenance backup/restore tool
+
+.SH SYNOPSIS
+.B backup2l
+[
+.BI "-c " conffile
+] [
+.BI "-t " "backup-ID"
+]
+.I command
+
+.SH DESCRIPTION
+\fBbackup2l\fP is a tool for generating, maintaining and restoring backups on a mountable file system
+(e. g. hard disk). The main design goals are low maintenance effort, efficiency, transparency and robustness.
+It features differential backups at multiple hierarchical levels and provides rollback functionality.
+
+All control files are stored together with the archives on the backup device, and their contents are
+mostly self-explaining. Hence, in the case of an emergency, a user does not only have to rely on the
+restore functionality of \fBbackup2l\fP, but can - if necessary - browse the files and extract
+archives manually.
+
+An open driver architecture allows to use virtually any archiving program as a backend.
+Built-in drivers support \fB.tar.gz\fP, \fB.tar.bz2\fP, or \fB.afioz\fP files. Further drivers can be
+added by the user. When restoring data, an appropriate driver is selected automatically for each
+archive depending on the suffix of the archive file.
+
+The method of hierarchical differential backups is a generalization to the concept of the "daily",
+"weekly" and "monthly" backups.
+Each backup has a level and a serial number. Maximum-level backups are comparable with
+daily differential backups, level-0 backups are full backups. For example, let \fBMAX_LEVEL\fP be 4
+and \fBMAX_PER_LEVEL\fP be 5. After 5 level-4 backups (e. g. after 5 days), a new level-3 backup is made.
+After 5 level-3 backups (and 5*5 at level-4), a new level-2 backup is made, and so on.
+Each differential backup contains the changes towards the previous backup of the same or a lower level.
+
+This scheme allows to efficiently generate small incremental backups at short intervals.
+At the same time, the total number of archives that have to be stored (or processed in the case of a restore)
+only increases logarithmically with the number of backups since the last full backup. Time-consuming
+full backups are only sparsely needed.
+In the example above, a new full backup is only necessary after 780 (=5^4+5^3+5*5+5) days, while only
+at most 20 (=4*5) archives have to be processed.
+
+For \fBbackup2l\fP, each backup archive is identified by its \fBbackup ID (BID)\fP. The number of digits
+determines the level. Level-0 (full) backups have a 1-digit BID, level-n backups have a BID of n+1 digits.
+The last digit is a serial number, the prefix identifies the lower-level backups on which a given backup
+is based on. For example, the archive 235 contains the differences towards archive 234, and to restore
+the file system state of the time it was generated, the full backup 2, the level-1 backups 21, 22, 23
+and the level-2 backups 231, ..., 235 have to be processed.
+All serial numbers are between 1 and 9, a zero in the BID indicates that no archive of the respective level
+is contained in the chain. For example, the level-3 backup 1201 is immediately based on the level-1
+backup 12.
+
+For deciding whether a file is new or modified, \fBbackup2l\fP looks at its name, modification time, size,
+ownership and permissions. Unlike other backup tools, the i-node is not considered in order to avoid problems with
+non-Unix file systems like FAT32.
+
+.SH OPTIONS
+.TP
+.BI "\-c, --conf " conffile
+This argument specifies the configuration file (default: \fBetc/backup2l.conf\fP).
+.TP
+.BI "\-t, --time " "BID"
+If present, this option selects a certain backup for the \fB--locate\fP and \fB--restore\fP commands.
+E. g., the latter will restore files and directories exactly as they were on the system at the time when the
+specified backup was made. If not present, the latest available backup is selected.
+.SH COMMANDS
+.TP
+.BI "\-h, --help"
+Display the usage info.
+.TP
+.BI "\-e, --estimate " "\fR[\fP level \fR]\fP"
+Prints the number of files, estimated amount of data and other information on the backup that would be
+generated next. No backup archives are actually created
+or removed. If specified, the parameter \fBlevel\fP overrides the \fBMAX_LEVEL\fP setting.
+.TP
+.BI "\-b, --backup " "\fR[\fP level \fR]\fP"
+Creates a new backup and removes old archives based on the given configuration file.
+If specified, the parameter \fBlevel\fP overrides the \fBMAX_LEVEL\fP setting. This is useful e. g. shortly
+before or after major changes are performed with the file system. In this case, a lower level should be
+specified in order to avoid that a large number of files are backed up multiple times again.
+.TP
+.BI "\-s, --get-summary"
+Shows a table describing each backup (date, size, files, ...) and the file system usage of the backup device.
+.TP
+.BI "\-a, --get-available " "\fR[\fP pattern list \fR]\fP"
+Shows all files removed and added for all backups. A '+' in the output indicates that the file is new and
+thus contained in the archive file. A '-' indicates that the file has been removed (or replaced).
+If one or several patterns are supplied, \fBgrep(1)\fP is used to filter
+the list. All status messages go to \fBstderr\fP, so that the generated file list can easily be redirected.
+
+\fBNote:\fP The search pattern is not just applied to the file names, but to the whole entry in the \fB.list.gz\fP
+file. This allows you to not only search for file names but also for other attributes like
+ownership, modification time etc. . In order to apply a search pattern to file names only, preceed it by
+"<space>/.*".
+.TP
+.BI "\-l, --locate " "\fR[\fP pattern list \fR]\fP"
+Shows most recent backup location for active files. If one or several patterns are supplied, \fBgrep(1)\fP
+is used to filter the list in the same way as for \fB--get-available\fP (see above) . All status messages
+go to \fBstderr\fP, so that the generated file list can easily be redirected.
+
+Active files are files that have been on the system at the time of the selected backup, which is either
+the latest backup or the one specified by \fB--time\fP (see above). Files that were removed at that time
+but are still stored in some later archive will not be shown.
+
+Altogether, this command tells you, which files have to be extracted from which archive in order to
+restore the state of the system at the time of the selected backup.
+.TP
+.BI "\-r, --restore " "\fR[\fP pattern list \fR]\fP"
+Performs the same steps like \fB--locate\fP and then restores the respective files. All files are restored
+relative to the current directory. They can be restored to their original location by cd'ing into / before,
+but this is not recommended.
+.TP
+.BI "\-p, --purge " "BID list"
+Removes the specified backup archive(s) and all depending backups.
+.TP
+.BI "\-m, --make-check " "\fR[\fP BID list \fR]\fP"
+Creates (a) check file(s) for the specified archive(s) using \fBmd5sum(1)\fP.
+If no BID is specified, check files are created wherever missing.
+.TP
+.BI "\-v, --verify " "\fR[\fP BID list \fR]\fP"
+Verifies the specified backup archive(s). If no BID is specified, all existing archives are checked.
+If a check file exists, this allows a comprehensive test including e. g. media failures. If the check file
+is missing, only the existence of all files and the immediate base archive are verified.
+.TP
+.BI "\-x, --extract " "capacity max-free BID-list"
+Split and collect files to be stored on removable media (e. g. CDs). \fBcapacity\fP is the medium
+capacity in MB. \fBmax-free\fP is the maximum amount of empty space on each medium (except for the last
+one, of course). \fBBID-list\fP specifies the archives and may contain wildcards, e. g.: 1 '2*'.
+The operation generates enumbered subdirectories representing the media contents.
+Some more files are generated that may be useful, e. g. to print labels.
+
+While guaranteeing a minimum waste of \fBmax-free\fP MB per medium, the collection procedure preserves
+the ordering of files and keeps all control files of an archive always together on the same medium.
+Large archive files are split into multiple files with serial numbers appended to their names.
+
+The operation is interactive. Just run it and look what it is about to do.
+If that is not what you want, you can stop it.
+
+.SH CONFIGURATION
+In the configuration file (\fB/etc/backup2l.conf\fP by default), the following variables have to be set,
+following the \fBbash(1)\fP syntax:
+.TP
+.BI "FOR_VERSION=" "version"
+Defines the \fBbackup2l\fP version for which the configuration file is written. This way,
+future versions can automatically print a warning if the syntax has changed.
+.TP
+.BI "SRCLIST=(" " source list " ")"
+This is a blank-separated list of all top-level directories to make backups of.
+Directory names with spaces have to be quoted, e. g.: SRCLIST=("/my dir" /another/dir).
+The last elements of the list may be options for \fBfind(1)\fP, for example \fB-xdev\fP in
+order to skip subdirs on other file systems like /dev or /proc.
+.TP
+.BI "SKIPCOND=(" " find condition " ")"
+Files for which this condition is 'true' are not considered for backup.
+See \fBfind(1)\fP for information on how to formulate possible conditions.
+Special characters ("(", ")", "!", ...) must be quoted by a leading backslash
+("\\(", "\\)", " \\!", ...). An empty condition (i. e. if you do not want
+any files to be skipped) must be specified as "( -false )".
+.TP
+.BI "[ BACKUP_DEV=""" "mount_point" """ ]"
+If defined, \fBbackup2l\fP mounts the backup device before any operation.
+Afterwards, it is unmounted unless it was already mounted before.
+.TP
+.BI "BACKUP_DIR=""" "backup dir" """"
+Destination directory for backup files. This must be different from \fBMOUNT_POINT\fP, i. e.
+a subdirectory on the device.
+.TP
+.BI "VOLNAME=""" "volname" """"
+This is a common prefix for all backup and control files. Multiple backup volumes are possible
+if for each volume a separate configuration file is written.
+.TP
+.BI "MAX_LEVEL=" "max_level"
+Maximum backup level. Possible values are 1..9.
+.TP
+.BI "MAX_PER_LEVEL=" "max_per_level"
+Number of differential backups per level. Possible values are 1..9.
+.TP
+.BI "MAX_FULL=" "max_full"
+Number of full backups kept. Possible values are 1..8.
+.TP
+.BI "GENERATIONS=" "generations"
+Number of backup generations to keep for each non-zero level. Old backups are automatically removed
+as long as at least \fBGENERATIONS * MAX_PER_LEVEL\fP backups for the respective level remain.
+
+For example, with \fBMAX_LEVEL=3, MAX_PER_LEVEL=5, GENERATIONS=2\fP it is always possible to access
+the last 10 level-3 (e. g. daily) backups, the last 10 level-2 backups (e. g. 5, 10, 15, ..., 50 days old),
+and so on.
+.TP
+.BI "PRE_BACKUP () { " "do something" " }"
+This function is called before writing the backup. It can be used to dump some important system information,
+e. g. the HD's partition table, to a file which is then backed up.
+.TP
+.BI "POST_BACKUP () { " "do something" " }"
+This function is called after writing the backup. Together with \fBPRE_BACKUP\fP it can be used to stop and restart
+e. g. database or mail services which may frequently alter some files that have to be backed up.
+.TP
+.BI "[ AUTORUN=1 ]"
+If set to 1, \fBbackup2l\fP performs the \fB--backup\fP operation when invoked without arguments.
+Otherwise, the usage information is shown.
+.TP
+.BI "[ SIZE_UNITS= " "B | K | M | G" " ]"
+Sets the units for archive sizes in summary listings to bytes, KB, MB, or GB.
+If unset, a user-readable format is chosen automatically. If set, the units are the same for the whole table,
+which may be even more user-friendly.
+.TP
+.BI "[ CREATE_DRIVER=""" "archive driver" """ ]"
+Selects an archive driver for creating backups. An archive driver is responsible for managing backup
+files. If unset, the default driver "DRIVER_TAR_GZ" is used. The \fB--help\fP operation lists all
+available drivers. More drivers can be defined in the configuration file (see below).
+.TP
+.BI "[ USER_DRIVER_LIST=""" "user-defined drivers" """ ]"
+Declares additional, user-defined archive drivers which are implemented in the configuration file.
+The sample configuration file contains a commented example. Read it in order to learn how to
+implement your own driver.
+
+.SH FILES
+
+.TP
+.B /etc/backup2l.conf
+Configuration file.
+.TP
+.IB "VOLNAME" "." "BID" ".tar.gz, " "VOLNAME" "." "BID" ".afioz, ..."
+Archive files.
+.TP
+.IB "VOLNAME" "." "BID" ".list.gz"
+List of all active files when the backup was made. Each file is preceeded with its size,
+modification time, and other information.
+.TP
+.IB "VOLNAME" "." "BID" ".new.gz"
+List of all new ore modified files when the backup was made (pathnames only). Unless an error
+occured, this list reflects the contents of the archive.
+.TP
+.IB "VOLNAME" "." "BID" ".obsolete.gz"
+List of all obsolete files when the backup was made (pathnames only).
+.TP
+.IB "VOLNAME" "." "BID" ".skipped.gz"
+Complete list of all files that were skipped according to \fBSKIPMASK\fP.
+.TP
+.IB "VOLNAME" "." "BID" ".error.gz"
+This file is generated by comparing the \fB.new.gz\fP file with the actual archive
+contents using \fBdiff(1)\fP. If the error file is non-empty, something may have gone wrong.
+.TP
+.IB "VOLNAME" "." "BID" ".check"
+MD5 check sums of all files of the present archive and the \fB.list.gz\fP file of the base archive.
+This file is optional and may be used by the \fB--verify\fP operation.
+.SH INVOCATION BY CRON
+\fBbackup2l\fP is designed to be run autonomously as a cron job.
+If the variable \fBAUTORUN\fP is set, it generates a backup if invoked without any parameters, and
+you can simply create a symlink, e. g. by:
+
+.ce
+ln -s `which backup2l` /etc/cron.daily/zz-backup2l
+
+The "zz-" prefix causes the backup job to be the last one executed, so that other jobs are not delayed
+if the backup takes somewhat longer. The status output is e-mailed to root by the cron daemon.
+
+.SH MANIPULATING FILES AND CONFIGURATIONS
+\fBbackup2l\fP has been designed to be robust with respect to errors and configuration changes.
+If the backup process is interrupted, e. g. because of a shutdown while it is running,
+no serious data corruption can occur. Some temporary files may remain which are cleaned up during the
+next run. If file is changed during the backup generation, it may not be contained in the current
+backup. However, it is guaranteed that it is considered modified during the next backup.
+
+In order to save disk space, e. g. after some archives have been copied to external media,
+archive files (.tar.gz or .afioz, for example) can safely be removed from the backup directory.
+As long as all control files are kept, \fBbackup2l\fP retains full functionality as far as possible.
+The \fB--restore\fP command prompts for eventually missing archive files for the respective request
+(and only those). The \fB--extract\fP command completely ignores all backups with missing archive files.
+
+The configuration, especially the settings for \fBMAX_LEVEL\fP,  \fBMAX_PER_LEVEL\fP,
+\fBMAX_FULL\fP and the specification of source files,
+can be arbitrarily changed without having to expect data corruption. \fBbackup2l\fP will
+gracefully adapt the new settings during the next run.
+
+.SH COPYRIGHT
+Copyright (c) 2001-2004 by Gundolf Kiefer.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published
+by the Free Software Foundation; either version 2 of the License,
+or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+MA 02111-1307 USA.
+
+.SH BUGS
+After a restore operation, the modification time of directories is equal
+to the restoration time while for files it is equal to the original modification
+time.
+
+.SH SEE ALSO
+.BR "tar(1), afio(1), find(1), grep(1), md5sum(1)"
+
+.SH AUTHOR
+Gundolf Kiefer <gundolfk@web.de>
