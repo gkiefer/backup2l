@@ -1,5 +1,7 @@
 # *backup2l* - a low-maintenance backup/restore tool
 
+by Gundolf Kiefer, 2001-2015
+
 ## Description
 
 *backup2l* is a lightweight command line tool for generating, maintaining and restoring backups on a mountable file system (e. g. hard disk). The main design goals are are low maintenance effort, efficiency, transparency and robustness. In a default installation, backups are created autonomously by a cron script.
@@ -7,6 +9,8 @@
 *backup2l* supports hierarchical differential backups with a user-specified number of levels and backups per level. With this scheme, the total number of archives that have to be stored only increases logarithmically with the number of differential backups since the last full backup. Hence, small incremental backups can be generated at short intervals while time- and space-consuming full backups are only sparsely needed.
 
 The restore function allows to easily restore the state of the file system or arbitrary directories/files of previous points in time. The ownership and permission attributes of files and directories are correctly restored.
+
+An open driver architecture allows to use virtually any archiving program as a backend. Built-in drivers support .tar.gz, .tar.bz2, or .afioz files. Further user-defined drivers can be added as described in the supplied sample configuration file 'first-time.conf'.
 
 An integrated split-and-collect function allows to comfortably transfer all or selected archives to a set of CDs or other removable media.
 
@@ -16,7 +20,7 @@ For deciding whether a file is new or modified, *backup2l* looks at its name, mo
 
 ## Screenshots
 
-### a) Generating a backup: mail received from cron daemon
+**a) Generating a backup: mail received from cron daemon**
 
 The monitored area covers 26803 (=23733+3053) files and directories and over 2.2 GB of data. Look at the time stamps!
 
@@ -77,7 +81,7 @@ Filesystem            Size  Used Avail Use% Mounted on
 Unmounting /disk2...
 ```
 
-### b) Restoring the directory */home/home/gundolf/prog/* from snapshot *<all.1102>*:
+**b) Restoring the directory */home/home/gundolf/prog/* from snapshot *<all.1102>*:**
 
 ```
 lilienthal:/scratch# backup2l -t 1102 -r /home/gundolf/prog/
@@ -99,3 +103,70 @@ Restoring files...
 Unmounting /disk2...
 lilienthal:/scratch#
 ```
+
+## Installation (from main source directory)
+
+* Debian Linux: Type 'debuild' to get a binary deb archive.
+* Others: Run './install-sh' or 'sh install-sh' and follow the instructions.
+
+
+## Release Notes
+
+Old releases prior to 1.5 can be downloaded from http://sourceforge.net/projects/backup2l/.
+Releases from 1.5 upwards are git-tagged accordingly.
+
+
+**Version 1.4**
+
+With some help from Joe Auricchio <avarame@ml1.net>, backup2l should
+now run under Mac OS X 10.3 (but may still be unstable!). The following
+known restrictions apply:
+- installing the GNU findutils, e. g. from fink (fink.sf.net),
+  in particular the GNU versions of 'find' and 'xargs'.
+- If no GNU version of sed is installed, the FILTER_* commands in the
+  beginning of "backup2l" have to be changed to use per for filtering
+  (just uncomment the respective lines there).
+- In some cases, the printf "%s" command of 'find' always returns 0
+  instead of the file size. This leads to incorrect size reports.
+- The date in the summary output is broken unless GNU date is installed.
+
+Binaries for the four GNU programs which Macintosh users need to install
+before using backup2l (find, xargs, sed and date) may be found at
+http://luddite.cst.usyd.edu.au/~jason/macos-gnu-utils-for-backup2l.tgz
+(Jason Grossman <Jason.Grossman@staff.usyd.edu.au>).
+
+
+**Version 1.1**
+
+An new open driver architecture allows to use virtually any archiving
+program as a backend. Built-in drivers support .tar.gz, .tar.bz2, or
+.afioz files. Further user-defined drivers can be added as described in
+the sample configuration file 'first-time.conf'.
+
+Due to major code changes, this release may be unstable. The latest
+stable release is 1.01. Archives created by the default driver
+("DRIVER_TAR_GZ") are fully compatible with backup2l 1.01.
+
+
+**Versions 0.9 & 0.91**
+
+Some versions of find (e. g. 4.1.7.) seem to have a bug so that printf does
+not produce leading 0's if requested. As a result, the .list.gz, .new.gz and
+.obsolete.gz files may contain entries like
+
+  4 11/11/01 02:07:17    0.   0 0777 /var/squid/some_file
+
+instead of
+
+  4 11/11/01 02:07:17 0000.0000 0777 /var/squid/some_file
+
+In backup2l 0.91, a workaround is implemented to guarantee the correct (2nd)
+format. Two issues have to be considered:
+
+a) Without leading 0's, a restore operation may fail.
+
+b) Backups are always created correctly. However, when switching to 0.91,
+   differential backups may be larger than necessary.
+
+It is recommended either to modify incorrect .list.gz, .new.gz and
+.obsolete.gz files manually or to purge the respective archives.
