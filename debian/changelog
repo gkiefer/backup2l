@@ -1,3 +1,10 @@
+backup2l (1.6) unstable; urgency=low
+  * make .list.gz files independent from timezone by adding a new TIME_ZONE parameter, closes #581344
+  * optimized man page to comply with Debian rules (Patch by Joachim Wiedorn, May 8 2010)
+  * added some more example drivers donated by various users
+
+ -- Gundolf Kiefer <gundolfk@web.de>  Tue,  17 Aug 2010 12:43:05 +0200
+
 backup2l (1.5) unstable; urgency=low
   * Add self-test script to each external volume
   * changed FORMAT to truncate fractional parts from time stamps in .list.gz files (needed for Debian 5.0/Lenny)

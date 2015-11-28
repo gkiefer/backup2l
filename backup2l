@@ -26,7 +26,7 @@
 ##################################################
 # Set global variables
 
-VER=1.5
+VER=1.6-pre1
 
 
 # The following variable defines the commonly required tools. Additional tools
@@ -47,7 +47,6 @@ FILTER_CHOWN="sed 's#^\( *[^ ]\+\)\{3\} *0\{0,3\}\([0-9]\+\)\.0\{0,3\}\([0-9]\+\
     # sed command for extracting ownerships and names from .list files
 FILTER_CHMOD="sed 's#^\( *[^ ]\+\)\{4\} *\([0-9]\{4\}\) \+/\(.*\)\$#\2 \"\3\"#'"
     # sed command for extracting permissions and names from .list files
-#FILTER_UNIFY_NAME="sed 's#\\\\[0-7]\{3\}#?#g;   s#[^a-zA-Z0-9_ .$%:~/=+\#\-]#?#g'"
 FILTER_UNIFY_NAME="sed 's#\\\\[0-7]\{3\}#?#g;   s#[^a-zA-Z0-9_ .$%:~/=+\#\-]#?#g'"
     # replaces special and escaped characters by '?';
     # only used when checking TOCs of fresh backup archives in order to avoid false alarms
@@ -625,8 +624,10 @@ prepare_backup ()
 
     # Determine main list & which files are new or obsolete...
     set -f  # pathname expansion off as it may destroy $SKIPCOND
-    OLDIFS=$IFS
+    OLDIFS="$IFS"
     IFS=""
+    OLDTZ="$TZ"
+    if [[ "$TIME_ZONE" != "" ]]; then export TZ="$TIME_ZONE"; else unset TZ; fi;
     find ${SRCLIST[*]} \( \( ${SKIPCOND[*]} \) \
         \( -type d -fprintf $TMP.skipped.dirs "$FORMAT/\n" -o -fprintf $TMP.skipped.files "$FORMAT\n" \) \) \
         -o \( -not -type d -printf "$FORMAT\n" -o -printf "$FORMAT/\n" \) \
@@ -634,6 +635,7 @@ prepare_backup ()
               -e 's#\(\. *\)  \([0-9 ]* /\)#\100\2#' -e 's#\. \([0-9 ]* /\)#\.0\1#' \
         | sort -k 6 \
         > $TMP.list
+    if [[ "$OLDTZ" != "" ]]; then export TZ="$OLDTZ"; else unset TZ; fi;
     IFS=$OLDIFS
     cat $TMP.skipped.dirs $TMP.skipped.files \
         | sed -e 's#   \([0-9]*\..* /.*\)# 00\1#' -e 's#  \([0-9]*\..* /\)# 0\1#' \
@@ -822,9 +824,9 @@ show_availability ()
         while [[ ${#FBID} -lt 5 ]]; do
             FBID=$FBID" "
         done
-        for X in "$MASK"; do
-           gunzip -c $VOLNAME.$BID.obsolete.gz | grep "$X" | sed "s/^/$VOLNAME.$FBID - /"
-           gunzip -c $VOLNAME.$BID.new.gz | grep "$X" | sed "s/^/$VOLNAME.$FBID + /"
+        for X in $MASK; do
+            gunzip -c $VOLNAME.$BID.obsolete.gz | grep "$X" | sed "s/^/$VOLNAME.$FBID - /"
+            gunzip -c $VOLNAME.$BID.new.gz | grep "$X" | sed "s/^/$VOLNAME.$FBID + /"
         done
     done
     cd /
@@ -861,7 +863,7 @@ get_location ()
     fi
 
     # determine active files...
-    for MASK in "$MASK_LIST"; do
+    for MASK in $MASK_LIST; do
         gunzip -c $VOLNAME.$BID.list.gz | grep "$MASK" | tee $TMP.found | grep '/$' >> $TMP.dirs
             # dirs go to $TMP.dirs WITH attributes
         grep -v '/$' $TMP.found | eval "$FILTER_NAME" >> $TMP.left
