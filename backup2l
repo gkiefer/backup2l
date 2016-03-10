@@ -780,13 +780,14 @@ do_backup ()
         create_check $NEW_BID
     fi
 
+    # print summary and finish...
+    rm -f $TMP.*
+
     # Run post-backup
     echo
     echo "Running post-backup procedure..."
     POST_BACKUP
 
-    # print summary and finish...
-    rm -f $TMP.*
     echo
     date
     echo
