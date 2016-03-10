@@ -328,7 +328,7 @@ mount_dev ()
         exit 3
     fi
     if [ -e $BACKUP_DIR/$VOLNAME.lock ]; then
-        if [ `ps -a | grep -af $BACKUP_DIR/$VOLNAME.lock | grep ${0##*/} | wc -l` -gt 0 ]; then
+        if [ `ps -a | grep -af $BACKUP_DIR/$VOLNAME.lock | grep -a ${0##*/} | wc -l` -gt 0 ]; then
             echo "ERROR: Backup volume is locked."
             echo
             echo "Another instance is currently running. If you are sure that this is not"
@@ -500,7 +500,7 @@ check_arch ()
     # Check check sum file...
     if [[ -f $VOLNAME.$BID.check ]]; then
         md5sum -c $VOLNAME.$BID.check 2>&1 | sed 's/^/  /'
-        if [[ $(( `grep $VOLNAME.$BID. $VOLNAME.$BID.check | wc -l` )) -lt 6 ]]; then
+        if [[ $(( `grep -a $VOLNAME.$BID. $VOLNAME.$BID.check | wc -l` )) -lt 6 ]]; then
             echo "  ERROR: Check file seems to be corrupted."
         fi
     else
@@ -555,7 +555,7 @@ show_summary ()
             total=$( gunzip -c $p.list.gz | wc -l )
             new_files=$( gunzip -c $p.new.gz | wc -l )
             obsolete=$( gunzip -c $p.obsolete.gz | wc -l )
-            errors=$( gunzip -c $p.error.gz | grep '<' | wc -l )
+            errors=$( gunzip -c $p.error.gz | grep -a '<' | wc -l )
             printf "%-12s %s %s |%8s |%8i %8i |%5i %5i |%5i\n" \
                    $p $(date -r $p.list.gz +"%Y-%m-%d %H:%M") "$size" \
                    $skipped $total $new_files $obsolete $errors
@@ -649,28 +649,28 @@ prepare_backup ()
         gunzip -c $VOLNAME.$BASE_BID.list.gz | sort -k 6 | diff - $TMP.list > $TMP.diff
           # WORKAROUND: 'sort -k 6' can be removed if sort uses the same options for every user,
           #             which seems to be not the case!!
-        if [[ $(( `grep "<" $TMP.diff | tail -n 1 | sed 's# /.*##' | wc -w` )) == 5 ]]; then
+        if [[ $(( `grep -a "<" $TMP.diff | tail -n 1 | sed 's# /.*##' | wc -w` )) == 5 ]]; then
             echo "  file '$VOLNAME.$BASE_BID.list.gz' has an old format - using compatibility mode"
             sed 's#[0-9]*\.[0-9 ]* /#- /#' < $TMP.list > $TMP.list.old
             gunzip -c $VOLNAME.$BASE_BID.list.gz | sort -k 5 | diff - $TMP.list.old > $TMP.diff
         fi
-        grep "<" $TMP.diff | sed 's/^< //' > $TMP.obsolete
-        grep ">" $TMP.diff | sed 's/^> //' > $TMP.new
+        grep -a "<" $TMP.diff | sed 's/^< //' > $TMP.obsolete
+        grep -a ">" $TMP.diff | sed 's/^> //' > $TMP.new
     else
         # by convention, the *.new and *.obsolete files always exist, although redundant for level-0 backups
         do_symlink $TMP.list $TMP.new
         touch $TMP.obsolete
     fi
-    eval "$FILTER_NAME" < $TMP.new | grep -v "/$" > $TMP.files   # extract real files
+    eval "$FILTER_NAME" < $TMP.new | grep -av "/$" > $TMP.files   # extract real files
 
     # Print statistics...
-    echo " " `wc -l < $TMP.files` / `grep -v '/$' $TMP.list | wc -l` "file(s)," \
-        `grep '/$' $TMP.new | wc -l` / `grep '/$' $TMP.list | wc -l` "dir(s)," \
-        `grep -v '/$' $TMP.new | readable_bytes_sum`"B /" \
-        `grep -v '/$' $TMP.list | readable_bytes_sum`"B (uncompressed)"
-    echo "  skipping:" `grep -v '/$' $TMP.skipped | wc -l` "file(s)," \
-        `grep '/$' $TMP.skipped | wc -l` "dir(s)," \
-        `grep -v '/$' $TMP.skipped | readable_bytes_sum`"B (uncompressed)"
+    echo " " `wc -l < $TMP.files` / `grep -av '/$' $TMP.list | wc -l` "file(s)," \
+        `grep -a '/$' $TMP.new | wc -l` / `grep -a '/$' $TMP.list | wc -l` "dir(s)," \
+        `grep -av '/$' $TMP.new | readable_bytes_sum`"B /" \
+        `grep -av '/$' $TMP.list | readable_bytes_sum`"B (uncompressed)"
+    echo "  skipping:" `grep -av '/$' $TMP.skipped | wc -l` "file(s)," \
+        `grep -a '/$' $TMP.skipped | wc -l` "dir(s)," \
+        `grep -av '/$' $TMP.skipped | readable_bytes_sum`"B (uncompressed)"
 }
 
 
@@ -826,8 +826,8 @@ show_availability ()
             FBID=$FBID" "
         done
         for X in $MASK; do
-            gunzip -c $VOLNAME.$BID.obsolete.gz | grep "$X" | sed "s/^/$VOLNAME.$FBID - /"
-            gunzip -c $VOLNAME.$BID.new.gz | grep "$X" | sed "s/^/$VOLNAME.$FBID + /"
+            gunzip -c $VOLNAME.$BID.obsolete.gz | grep -a "$X" | sed "s/^/$VOLNAME.$FBID - /"
+            gunzip -c $VOLNAME.$BID.new.gz | grep -a "$X" | sed "s/^/$VOLNAME.$FBID + /"
         done
     done
     cd /
@@ -865,9 +865,9 @@ get_location ()
 
     # determine active files...
     for MASK in $MASK_LIST; do
-        gunzip -c $VOLNAME.$BID.list.gz | grep "$MASK" | tee $TMP.found | grep '/$' >> $TMP.dirs
+        gunzip -c $VOLNAME.$BID.list.gz | grep -a "$MASK" | tee $TMP.found | grep -a '/$' >> $TMP.dirs
             # dirs go to $TMP.dirs WITH attributes
-        grep -v '/$' $TMP.found | eval "$FILTER_NAME" >> $TMP.left
+        grep -av '/$' $TMP.found | eval "$FILTER_NAME" >> $TMP.left
             # files go to $TMP.left WITHOUT attributes
     done
     echo "Active files in <$VOLNAME.$BID>:" `wc -l < $TMP.left`
@@ -982,7 +982,7 @@ do_restore ()
             BID=${ARCH#$VOLNAME.}
             DRIVER=${ARCH_AND_DRIVER##*:}
             SUFFIX=`$DRIVER -suffix`
-            grep "^$ARCH:" $BACKUP_DIR/$TMP.located \
+            grep -a "^$ARCH:" $BACKUP_DIR/$TMP.located \
                 | sed -e "s#^$ARCH: /##" -e 's#\([][*?]\)#\\\1#g' \
                 > $BACKUP_DIR/$TMP.curlist
                 # The second sed expression escapes special glob(7) characters ([]*?).
@@ -1066,7 +1066,7 @@ do_external ()
         done
     done
 
-    SPACE=$(( (`grep "\.[0-9]*$" TMP.xdist | awk '{ sum += $1 } END { print sum }'` + 1023) / 1024 ))
+    SPACE=$(( (`grep -a "\.[0-9]*$" TMP.xdist | awk '{ sum += $1 } END { print sum }'` + 1023) / 1024 ))
     cat << EOT
 I am about to split and combine the selected backup archives into directories
 of equal size, so that they can be stored on a set of removable media
@@ -1108,21 +1108,21 @@ EOT
     sed -e 's#^[ 0-9]*##' -e 's#/.*$##' < TMP.xdist | sort -u | xargs -l1 mkdir -p
 
     # create links...
-    for FILE in `grep -v '\.[0-9]*$' TMP.xdist | sed 's#^[ 0-9]*##'`; do
+    for FILE in `grep -av '\.[0-9]*$' TMP.xdist | sed 's#^[ 0-9]*##'`; do
         do_symlink $BACKUP_DIR/${FILE#data-??/} $FILE
     done
 
     echo "Splitting large files..."
-    for FILE in `grep '\.01$' TMP.xdist | sed -e 's#^[ 0-9]*##' -e 's#.01$##'`; do
+    for FILE in `grep -a '\.01$' TMP.xdist | sed -e 's#^[ 0-9]*##' -e 's#.01$##'`; do
         ORG_FILE=${FILE#data-??/}
         echo "  $ORG_FILE"
-        HEAD_SIZE=$(( `grep $FILE TMP.xdist | sed 's/ [^ ]*$//'` * 1024 ))
+        HEAD_SIZE=$(( `grep -a $FILE TMP.xdist | sed 's/ [^ ]*$//'` * 1024 ))
         head $BACKUP_DIR/$ORG_FILE -c $HEAD_SIZE > $FILE.01
         tail $BACKUP_DIR/$ORG_FILE -c +$(( $HEAD_SIZE + 1 )) | split -b $(( $CAPACITY * 1024 )) - TMP.split.
         SPLIT_NO=2
         for SPLIT in `ls -1 TMP.split.*`; do
             DST_FILE=`printf "$ORG_FILE.%02i" $SPLIT_NO`
-            DST=`grep $DST_FILE TMP.xdist | sed 's#^[ 0-9]*##'`
+            DST=`grep -a $DST_FILE TMP.xdist | sed 's#^[ 0-9]*##'`
             mv $SPLIT $DST
             : $[ SPLIT_NO += 1 ];
         done
@@ -1178,7 +1178,7 @@ EOT
       for DISK in data-??; do
           DISK_NO=${DISK#data-}
           echo -e "\nContents\n========\n" > contents-$DISK_NO.txt
-          grep $DISK TMP.xdist | sed -e 's#^.*/##' -e 's#\.list\.gz# - control files#' \
+          grep -a $DISK TMP.xdist | sed -e 's#^.*/##' -e 's#\.list\.gz# - control files#' \
               | grep -vE "$CTRL_EXPR" >> contents-$DISK_NO.txt
           cdlabelgen -c "$ANSWER" -s "${DISK_NO#0} of $LAST_DISK" -d `date -I` \
               -f contents-$DISK_NO.txt $TRAYPIC -o cd-cover-$DISK_NO.ps
