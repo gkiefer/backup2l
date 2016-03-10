@@ -26,7 +26,7 @@
 ##################################################
 # Set global variables
 
-VER=1.6-pre1
+VER=1.6-pre2
 
 
 # The following variable defines the commonly required tools. Additional tools
@@ -310,12 +310,22 @@ get_archive ()                   # Argument: <path><volname><bid>
 ##################################################
 # (Un)mount backup disk and (un)lock volume
 
+# Note: The locking mechanism is not completely safe, since in 'mount_dev'
+# the existence check and the setting of the lock are seperate operation
+# instead of one atomic one (such as "test-and-set"). Atomic operations
+# would require support by the underlying file system, the type of which
+# we do not know and do not want to dictate. So we consider this little
+# synchronization hole tolerable.
 
-MUST_BE_UNMOUNTED=0
+
+MUST_BE_UNMOUNTED=0   # did we mount a device?
+VOL_IS_LOCKED=0       # did we already lock (aka "mount") the volume?
 
 
 mount_dev ()
 {
+    if [ $VOL_IS_LOCKED -eq 1 ]; then return 0; fi   # do not lock twice
+
     if [ ! -d $BACKUP_DIR -a "$BACKUP_DEV" != "" ]; then
         echo "Mounting $BACKUP_DEV..."
         echo
@@ -327,6 +337,7 @@ mount_dev ()
         umount $BACKUP_DEV >& /dev/null
         exit 3
     fi
+    # Locking: Begin
     if [ -e $BACKUP_DIR/$VOLNAME.lock ]; then
         if [ `ps -a | grep -af $BACKUP_DIR/$VOLNAME.lock | grep -a ${0##*/} | wc -l` -gt 0 ]; then
             echo "ERROR: Backup volume is locked."
@@ -337,17 +348,44 @@ mount_dev ()
         fi
     fi
     echo $$ > $BACKUP_DIR/$VOLNAME.lock
+    # Locking: End
+    VOL_IS_LOCKED=1
 }
 
 
 umount_dev ()
 {
-    rm -f $BACKUP_DIR/$VOLNAME.lock
-    if [ $MUST_BE_UNMOUNTED == "1" ]; then
+    if [ $VOL_IS_LOCKED -eq 0 ]; then return 0; fi   # do not unlock twice
+
+    if [[ "`cat $BACKUP_DIR/$VOLNAME.lock 2>/dev/null`" == "$$" ]]; then
+        # A lock exists and comes from this instance => everything is ok
+        # Note: This test of a (rare) locking failure is also not perfect
+        # and may itself fail, e.g. if the backup devices is on a network
+        # and the lock files are cached locally. However, a (very very rare)
+        # failure here is tolerable: The user would receive an (obscure)
+        # error message and can repeat the backup / his operation.
+        rm -f $BACKUP_DIR/$VOLNAME.lock
+        if [ $MUST_BE_UNMOUNTED -eq 1 ]; then
+            echo
+            echo "Unmounting $BACKUP_DEV..."
+            umount $BACKUP_DEV
+            MUST_BE_UNMOUNTED=0
+        fi
+        VOL_IS_LOCKED=0
+    else
+        # No lock file exists, or it comes from another process => we have a race problem
         echo
-        echo "Unmounting $BACKUP_DEV..."
-        umount $BACKUP_DEV
-        MUST_BE_UNMOUNTED=0
+        echo "WARNING: Volume is or was locked by another instance of 'backup2l'."
+        echo
+        echo "It appears that another instance of 'backup2l' is or was running concurrently."
+        echo "This should not happen, but cannot be avoided completely with the present"
+        echo "implementation of locking in 'backup2l'. I am sorry!"
+        echo
+        echo "The following steps should bring everything back into order:"
+        echo "1. Stop all instances of 'backup2l'."
+        echo "2. Remove the lock file '$BACKUP_DIR/$VOLNAME.lock' manually."
+        echo "3. Re-run the backup."
+        echo "4. Unmount the backup device (if desired)."
     fi
 }
 
