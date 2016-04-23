@@ -1,9 +1,17 @@
 backup2l (1.6) unstable; urgency=low
-  * make .list.gz files independent from timezone by adding a new TIME_ZONE parameter, closes #581344
-  * optimized man page to comply with Debian rules (Patch by Joachim Wiedorn, May 8 2010)
+  * A detailed upstream changelog can be found at
+    https://github.com/gkiefer/backup2l.
+  * Improve locking, partially based on the patch "conditional unlocking" by
+    Joachim Wiedorn
+  * Apply patch "fix for grep (>2.20) with encoded filenames" by Joachim Wiedorn
+  * Apply patch "rm tmp before post backup" by Joachim Wiedorn
+  * make .list.gz files independent from timezone by adding a new TIME_ZONE
+    parameter (closes: #581344)
+  * optimized man page to comply with Debian rules (patch by Joachim
+    Wiedorn, May 8 2010)
   * added some more example drivers donated by various users
 
- -- Gundolf Kiefer <gundolfk@web.de>  Tue,  17 Aug 2010 12:43:05 +0200
+ -- Gundolf Kiefer <gundolf.kiefer@hs-augsburg.de>  Sat, 23 Apr 2016 14:00:44 +0200
 
 backup2l (1.5) unstable; urgency=low
   * Add self-test script to each external volume
