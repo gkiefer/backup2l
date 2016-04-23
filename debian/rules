@@ -5,6 +5,8 @@
 package=backup2l
 
 build:
+build-indep:
+build-arch:
 
 clean:
 	$(checkdir)
@@ -29,11 +31,11 @@ binary-arch:	checkroot build
 	./install-sh -fc debian/tmp/usr/share debian/tmp/usr/sbin debian/tmp/etc
 	cp -a debian/copyright debian/tmp/usr/share/doc/$(package)/
 	cp -a debian/changelog debian/tmp/usr/share/doc/$(package)/changelog
-	cp -a README debian/tmp/usr/share/doc/$(package)/
+	cp -a README.md debian/tmp/usr/share/doc/$(package)/
 	cp -a first-time.conf debian/tmp/usr/share/doc/$(package)/
 	cd debian/tmp/usr/share/doc/$(package) && gzip -9 changelog
-	cd debian/tmp/usr/share/doc/$(package) && gzip -9 README
-	dpkg-gencontrol -isp
+	cd debian/tmp/usr/share/doc/$(package) && gzip -9 README.md
+	dpkg-gencontrol
 	chown -R root.root debian/tmp
 	chmod -R g-ws debian/tmp
 	dpkg --build debian/tmp ..
