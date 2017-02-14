@@ -687,13 +687,13 @@ prepare_backup ()
         gunzip -c $VOLNAME.$BASE_BID.list.gz | sort -k 6 | diff - $TMP.list > $TMP.diff
           # WORKAROUND: 'sort -k 6' can be removed if sort uses the same options for every user,
           #             which seems to be not the case!!
-        if [[ $(( `grep -a "<" $TMP.diff | tail -n 1 | sed 's# /.*##' | wc -w` )) == 5 ]]; then
+        if [[ $(( `grep -a "^<" $TMP.diff | tail -n 1 | sed 's# /.*##' | wc -w` )) == 5 ]]; then
             echo "  file '$VOLNAME.$BASE_BID.list.gz' has an old format - using compatibility mode"
             sed 's#[0-9]*\.[0-9 ]* /#- /#' < $TMP.list > $TMP.list.old
             gunzip -c $VOLNAME.$BASE_BID.list.gz | sort -k 5 | diff - $TMP.list.old > $TMP.diff
         fi
-        grep -a "<" $TMP.diff | sed 's/^< //' > $TMP.obsolete
-        grep -a ">" $TMP.diff | sed 's/^> //' > $TMP.new
+        grep -a "^<" $TMP.diff | sed 's/^< //' > $TMP.obsolete
+        grep -a "^>" $TMP.diff | sed 's/^> //' > $TMP.new
     else
         # by convention, the *.new and *.obsolete files always exist, although redundant for level-0 backups
         do_symlink $TMP.list $TMP.new
