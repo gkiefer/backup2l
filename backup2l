@@ -173,7 +173,7 @@ DRIVER_TAR ()
             echo "tar"
             ;;
         -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
-            tar cf $3 -T $4 --numeric-owner --no-recursion 2>&1 \
+            tar cf $3 --no-recursion -T $4 --numeric-owner 2>&1 \
                 | grep -v 'tar: Removing leading .* from .* names'
             ;;
         -toc)           # Arguments: $2 = BID, $3 = archive file name
@@ -197,7 +197,7 @@ DRIVER_TAR_GZ ()
             echo "tar.gz"
             ;;
         -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
-            tar czf $3 -T $4 --no-recursion 2>&1 \
+            tar czf $3 --no-recursion -T $4 2>&1 \
                 | grep -v 'tar: Removing leading .* from .* names'
             ;;
         -toc)           # Arguments: $2 = BID, $3 = archive file name
@@ -221,7 +221,7 @@ DRIVER_TAR_BZ2 ()
             echo "tar.bz2"
             ;;
         -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
-            tar cjf $3 -T $4 --no-recursion 2>&1 \
+            tar cjf $3 --no-recursion -T $4 2>&1 \
                 | grep -v 'tar: Removing leading .* from .* names'
             ;;
         -toc)           # Arguments: $2 = BID, $3 = archive file name
