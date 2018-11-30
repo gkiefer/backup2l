@@ -47,7 +47,7 @@ FILTER_CHOWN="sed 's#^\( *[^ ]\+\)\{3\} *0\{0,3\}\([0-9]\+\)\.0\{0,3\}\([0-9]\+\
     # sed command for extracting ownerships and names from .list files
 FILTER_CHMOD="sed 's#^\( *[^ ]\+\)\{4\} *\([0-9]\{4\}\) \+/\(.*\)\$#\2 \"\3\"#'"
     # sed command for extracting permissions and names from .list files
-FILTER_UNIFY_NAME="sed 's#\\\\[0-7]\{3\}#?#g;   s#[^a-zA-Z0-9_ .$%:~/=+\#\-]#?#g'"
+FILTER_UNIFY_NAME="sed 's#\\\\[0-7]\{3\}#?#g;   s#[^a-zA-Z0-9_ .$%:~/=+\#\-]#?#g;   s#\\\\\\\\#\\\\#g'"
     # replaces special and escaped characters by '?';
     # only used when checking TOCs of fresh backup archives in order to avoid false alarms
 
@@ -1021,9 +1021,8 @@ do_restore ()
             DRIVER=${ARCH_AND_DRIVER##*:}
             SUFFIX=`$DRIVER -suffix`
             grep -a "^$ARCH:" $BACKUP_DIR/$TMP.located \
-                | sed -e "s#^$ARCH: /##" -e 's#\([][*?]\)#\\\1#g' \
+                | sed "s#^$ARCH: /##" \
                 > $BACKUP_DIR/$TMP.curlist
-                # The second sed expression escapes special glob(7) characters ([]*?).
             FILES=`wc -l < $BACKUP_DIR/$TMP.curlist`
             echo "  $ARCH.$SUFFIX:" $FILES "file(s) using '"$DRIVER"'"
             $DRIVER -extract $BID $BACKUP_DIR/$ARCH.$SUFFIX $BACKUP_DIR/$TMP.curlist | sed "s/^/    /"
