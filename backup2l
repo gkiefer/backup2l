@@ -339,7 +339,7 @@ mount_dev ()
     fi
     # Locking: Begin
     if [ -e $BACKUP_DIR/$VOLNAME.lock ]; then
-        if [ `ps -a | grep -af $BACKUP_DIR/$VOLNAME.lock | grep -a ${0##*/} | wc -l` -gt 0 ]; then
+        if [ `ps -ax | grep -af $BACKUP_DIR/$VOLNAME.lock | grep -a ${0##*/} | wc -l` -gt 0 ]; then
             echo "ERROR: Backup volume is locked."
             echo
             echo "Another instance is currently running. If you are sure that this is not"
