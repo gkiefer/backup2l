@@ -81,7 +81,7 @@ Filesystem            Size  Used Avail Use% Mounted on
 Unmounting /disk2...
 ```
 
-**b) Restoring the directory */home/home/gundolf/prog/* from snapshot *<all.1102>*:**
+**b) Restoring the directory */home/home/gundolf/prog/* from snapshot *<all.1102>* into the current working directory :**
 
 ```
 lilienthal:/scratch# backup2l -t 1102 -r /home/gundolf/prog/
