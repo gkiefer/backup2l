@@ -149,8 +149,9 @@ future versions can automatically print a warning if the syntax has changed.
 .BI "SRCLIST=(" " source list " ")"
 This is a blank\-separated list of all top\-level directories to make backups of.
 Directory names with spaces have to be quoted, e. g.: SRCLIST=("/my dir" /another/dir).
-The last elements of the list may be options for \fBfind(1)\fP, for example \fB\-xdev\fP in
-order to skip subdirs on other file systems like /dev or /proc.
+The last elements of the list may be options for \fBfind(1)\fP. For example \fB\-xdev\fP can
+be used to skip subdirs on other file systems such as /dev or /proc, or \fB\-L\fP
+will cause all symbolic links to be followed (use with care).
 .TP
 .BI "SKIPCOND=(" " find condition " ")"
 Files for which this condition is 'true' are not considered for backup.
