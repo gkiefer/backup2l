@@ -26,7 +26,7 @@
 ##################################################
 # Set global variables
 
-VER=1.6-pre2
+VER=1.7-pre1
 
 
 # The following variable defines the commonly required tools. Additional tools
@@ -174,7 +174,7 @@ DRIVER_TAR ()
             ;;
         -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
             tar cf $3 --no-recursion -T $4 2>&1 \
-                | grep -v 'tar: Removing leading .* from .* names'
+                | grep -v 'tar: Removing leading .* from .*'
             ;;
         -toc)           # Arguments: $2 = BID, $3 = archive file name
             tar tf $3 | sed 's#^#/#'
@@ -198,7 +198,7 @@ DRIVER_TAR_GZ ()
             ;;
         -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
             tar czf $3 --no-recursion -T $4 2>&1 \
-                | grep -v 'tar: Removing leading .* from .* names'
+                | grep -v 'tar: Removing leading .* from .*'
             ;;
         -toc)           # Arguments: $2 = BID, $3 = archive file name
             tar tzf $3 | sed 's#^#/#'
@@ -222,7 +222,7 @@ DRIVER_TAR_BZ2 ()
             ;;
         -create)        # Arguments: $2 = BID, $3 = archive file name, $4 = file list file
             tar cjf $3 --no-recursion -T $4 2>&1 \
-                | grep -v 'tar: Removing leading .* from .* names'
+                | grep -v 'tar: Removing leading .* from .*'
             ;;
         -toc)           # Arguments: $2 = BID, $3 = archive file name
             tar tjf $3 | sed 's#^#/#'
@@ -584,8 +584,8 @@ show_summary ()
     if [[ `echo $VOLNAME.*.list.gz` == "" ]]; then
         echo "No backup archives present."
     else
-        echo "Backup       Date       Time  |  Size   | Skipped  Files+D |  New  Obs. | Err."
-        echo "------------------------------------------------------------------------------"
+        echo "Backup       Date       Time  |  Size   | Skipped  Files+D |    New    Obs. | Err."
+        echo "----------------------------------------------------------------------------------"
         for f in `ls $VOLNAME.*.list.gz` ; do
             p=${f%%.list.gz}
             size="`du -sbL $p.* | readable_bytes_sum $SIZE_UNITS`"
@@ -594,7 +594,7 @@ show_summary ()
             new_files=$( gunzip -c $p.new.gz | wc -l )
             obsolete=$( gunzip -c $p.obsolete.gz | wc -l )
             errors=$( gunzip -c $p.error.gz | grep -a '<' | wc -l )
-            printf "%-12s %s %s |%8s |%8i %8i |%5i %5i |%5i\n" \
+            printf "%-12s %s %s |%8s |%8i %8i |%7i %7i |%5i\n" \
                    $p $(date -r $p.list.gz +"%Y-%m-%d %H:%M") "$size" \
                    $skipped $total $new_files $obsolete $errors
         done
@@ -790,11 +790,11 @@ do_backup ()
     echo
     echo "Creating archive using '"$CREATE_DRIVER"'..."
     ARCH_SUFFIX=`$CREATE_DRIVER -suffix`
-    $CREATE_DRIVER -create $NEW_BID $TMP.$ARCH_SUFFIX $TMP.files 2>&1 | sed 's/^/  /'
+    $CREATE_DRIVER -create $NEW_BID $TMP.$ARCH_SUFFIX $TMP.files 2>&1 | tee $TMP.error | sed 's/^/  /'
     if [ "$ARCH_SUFFIX" != "" ]; then
         echo "Checking TOC of archive file (< real file, > archive entry)..."
         $CREATE_DRIVER -toc $NEW_BID $TMP.$ARCH_SUFFIX | eval "$FILTER_UNIFY_NAME" > $TMP.toc
-        eval "$FILTER_UNIFY_NAME" < $TMP.files | diff - $TMP.toc | tee $TMP.error | sed 's/^/  /'
+        eval "$FILTER_UNIFY_NAME" < $TMP.files | diff - $TMP.toc | tee -a $TMP.error | sed 's/^/  /'
     fi
 
     # Move files in place...

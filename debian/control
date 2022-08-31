@@ -1,7 +1,7 @@
 Source: backup2l
 Section: admin
 Priority: optional
-Maintainer: Gundolf Kiefer <gundolf.kiefer@hs-augsburg.de>
+Maintainer: Gundolf Kiefer <gundolf.kiefer@web.de>
 Standards-Version: 3.9.6
 
 Package: backup2l

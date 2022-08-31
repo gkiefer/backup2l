@@ -1,3 +1,10 @@
+backup2l (1.7) unstable; urgency=low
+  * tar-based drivers: Fix unreported errors
+  * A detailed upstream changelog can be found at
+    https://github.com/gkiefer/backup2l.
+
+ -- Gundolf Kiefer <gundolf.kiefer@web.de>  Tue, 30 Aug 2022 13:23:50 +0200
+
 backup2l (1.6) unstable; urgency=low
   * A detailed upstream changelog can be found at
     https://github.com/gkiefer/backup2l.
