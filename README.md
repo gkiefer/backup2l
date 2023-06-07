@@ -1,6 +1,6 @@
 # *backup2l* - A Low-Maintenance Backup/Restore Tool
 
-by Gundolf Kiefer, 2001-2018
+by Gundolf Kiefer, 2001-2023
 
 ## Description
 
