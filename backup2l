@@ -348,6 +348,13 @@ mount_dev ()
         fi
     fi
     echo $$ > $BACKUP_DIR/$VOLNAME.lock
+    if [[ "`cat $BACKUP_DIR/$VOLNAME.lock 2>/dev/null`" != "$$" ]]; then
+      echo "ERROR: Failed to lock backup volume."
+      echo
+      echo "For some reason, the lock file '$BACKUP_DIR/$VOLNAME.lock' could not be created."
+      echo "Maybe I do not have write permissions for '$BACKUP_DIR'?"
+      exit 3
+    fi
     # Locking: End
     VOL_IS_LOCKED=1
 }
