@@ -2,7 +2,7 @@
 
 # backup2l --- low-maintenance backup tool
 
-# Copyright (c) 2001-2009 Gundolf Kiefer <gundolf.kiefer@web.de>
+# Copyright (c) 2001-2024 Gundolf Kiefer <gundolf.kiefer@web.de>
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 ##################################################
 # Set global variables
 
-VER=1.7-pre1
+VER=1.8-pre1
 
 
 # The following variable defines the commonly required tools. Additional tools
@@ -347,7 +347,7 @@ mount_dev ()
             exit 3
         fi
     fi
-    echo $$ > $BACKUP_DIR/$VOLNAME.lock
+    echo $$ > $BACKUP_DIR/$VOLNAME.lock 2>/dev/null
     if [[ "`cat $BACKUP_DIR/$VOLNAME.lock 2>/dev/null`" != "$$" ]]; then
       echo "ERROR: Failed to lock backup volume."
       echo
@@ -620,6 +620,9 @@ show_summary ()
 
 compute_level_and_bids ()
 {
+    # Input: Selected level (optional)
+    # Output: $LEVEL, $BASE_BID, $NEW_BID
+
     # Determine level and base BID for new backup...
     if [ ! -f $VOLNAME.1.list.gz ]; then
         LEVEL="0";
@@ -731,26 +734,19 @@ show_backup_estimates ()
 }
 
 
-do_backup ()
+remove_old_backups ()
 {
+    # Input: Selected level (optional)
+    # Output: $LEVEL, $BASE_BID, $NEW_BID
+
     require_tools $COMMON_TOOLS
-    require_drivers $CREATE_DRIVER
-
-    # Print time stamp & mount backup drive...
-    date
-    echo
-    mount_dev
-
-    # Run pre-backup
-    echo "Running pre-backup procedure..."
-    PRE_BACKUP
 
     # Operate in destination directory
+    mount_dev
     cd $BACKUP_DIR
     rm -fr $TMP.*
 
     # Remove old backups...
-    echo
     echo "Removing old backups..."
     name_cleanup  # should not do anything in normal cases
     compute_level_and_bids $1
@@ -788,6 +784,30 @@ do_backup ()
             done
         done
     fi
+}
+
+
+do_backup ()
+{
+    require_tools $COMMON_TOOLS
+    require_drivers $CREATE_DRIVER
+
+    # Print time stamp & mount backup drive...
+    date
+    echo
+    mount_dev
+
+    # Run pre-backup
+    echo "Running pre-backup procedure..."
+    PRE_BACKUP
+
+    # Operate in destination directory
+    cd $BACKUP_DIR
+    rm -fr $TMP.*
+
+    # Remove old backups...
+    echo
+    remove_old_backups $1
 
     # Prepare backup...
     echo
@@ -1259,7 +1279,8 @@ Where
 
   <command>:
     -h | --help                    : Help
-    -b | --backup [<level>]        : Create new backup
+
+    -b | --backup [<level>]        : Create new backup (implies --remove-old)
     -e | --estimate [<level>]      : Like -b, but nothing is really done
     -s | --get-summary             : Show backup summary
 
@@ -1268,6 +1289,7 @@ Where
     -r | --restore [<pattern>]     : Restore active files matching <pattern> into current directory
 
     -p | --purge <BID-list>        : Remove the specified backup archive(s) and all depending backups
+    -o | --remove-old [<level>]    : Remove backups older than specified by GENERATIONS
 
     -v | --verify [<BID-list>]     : Verify the specified / all backup archive(s)
     -m | --make-check [<BID-list>] : Create md5 checksum file for the specified archive(s) / wherever missing
@@ -1361,19 +1383,21 @@ case $1 in
     -h | --help)
         usage
         ;;
-    -e | --estimate)
-        banner
-        show_backup_estimates "$2"
-        ;;
+
     -b | --backup)
         banner
         do_backup "$2"
+        ;;
+    -e | --estimate)
+        banner
+        show_backup_estimates "$2"
         ;;
     -s | --get-summary)
         banner
         mount_dev
         show_summary
         ;;
+
     -a | --get-available)
         banner 1>&2
         shift
@@ -1389,11 +1413,18 @@ case $1 in
         shift
         do_restore $BID "$@"
         ;;
+
     -p | --purge)
         banner
         shift
         do_purge "$@"
         ;;
+    -o | --remove-old)
+        banner
+        shift
+        remove_old_backups "$@"
+        ;;
+
     -v | --verify)
         banner
         shift
@@ -1404,6 +1435,7 @@ case $1 in
         shift
         do_create_check "$@"
         ;;
+
     -x | --extract)
         banner
         shift
@@ -1413,6 +1445,7 @@ case $1 in
             do_external "$@"
         fi
         ;;
+
     *)
         if [ "$AUTORUN" = "1" ]; then
             banner

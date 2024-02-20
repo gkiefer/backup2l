@@ -1,3 +1,10 @@
+backup2l (1.8-pre1) unstable; urgency=low
+  * Add '--remove-old' operation to remove old backups in remote locations.
+  * A detailed upstream changelog can be found at
+    https://github.com/gkiefer/backup2l.
+
+ -- Gundolf Kiefer <gundolf.kiefer@web.de>  Tue, 20 Feb 2024 10:33:00 +0200
+
 backup2l (1.7) unstable; urgency=low
   * tar-based drivers: Fix unreported errors
   * A detailed upstream changelog can be found at
